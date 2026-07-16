@@ -8,7 +8,7 @@ AstroDesk keeps the practical shooting workflow in one dark, local-first desktop
 - ADB connection and phone-status monitoring;
 - shooting-session, frame-count, exposure, notes, and history tools;
 - non-destructive framing overlays, zoom, preview screenshots, and histograms;
-- weather, moon, and twilight context; and
+- altitude, hourly weather, Moon position, sky brightness, and target-aware shooting guidance; and
 - local SQLite storage and portable session exports.
 
 AstroDesk has no AI features, accounts, analytics, advertising, or telemetry.
@@ -42,8 +42,9 @@ The repository contains the production foundations for:
 - aspect-ratio-preserving preview rendering, DPI-aware coordinate mapping, rotation mapping, overlays, preview zoom, freeze inspection, and a focus magnifier;
 - direct Win32 mouse/keyboard message forwarding with lower-frequency ADB input fallbacks;
 - bounded frame delivery, throttled OpenCV histograms, and PNG preview screenshots;
-- no-key Open-Meteo weather and location search providers;
-- local moon and twilight calculations through Astronomy Engine; and
+- no-key Open-Meteo current/hourly weather, elevation, time-zone, and location search providers;
+- local Moon, twilight, and best-window calculations through Astronomy Engine and AstroDesk's planner;
+- objective public light-pollution atlas estimates; and
 - local rolling logs with retention and size limits.
 
 Some controls and integrations remain experimental or need end-to-end hardware verification. See [Known limitations](#known-limitations), [ROADMAP.md](ROADMAP.md), and [.github/ISSUES_TO_CREATE.md](.github/ISSUES_TO_CREATE.md).
@@ -174,14 +175,16 @@ SQLite remains the source of truth. Session folders contain portable exports and
 
 Before copying or backing up the live SQLite database, close AstroDesk and keep `astrodesk.db`, `astrodesk.db-wal`, and `astrodesk.db-shm` together if the sidecar files exist.
 
-## Weather, astronomy, and location
+## Weather, astronomy, sky quality, and location
 
-- Live weather and location search use Open-Meteo and require internet access, but no paid key or account. They are enabled by default for new installations and can be disabled in Settings.
-- Moon and twilight calculations run locally with Astronomy Engine.
+- Live current/hourly weather, model elevation, time-zone resolution, and location search use Open-Meteo and require internet access, but no paid key or account. They are enabled by default for new installations and can be disabled in Settings.
+- Moon position, its 36-hour track, twilight, and darkness calculations run locally with Astronomy Engine.
+- The tonight score and best shooting window are guidance derived from forecast conditions, the selected session type, darkness, Moon interference, and local skyglow. They are not a safety guarantee or a substitute for checking the sky at the site.
+- Sky quality uses the public 2024 [David Lorenz Light Pollution Atlas](https://djlorenz.github.io/astronomy/lp/overlay/dark.html). AstroDesk reports its objective atlas zone, estimated zenith brightness in mag/arcsec², and artificial-to-natural brightness ratio. It does not convert that map value into a claimed Bortle class.
 - Manual coordinates and seeded Lebanon examples are supported without restricting the app to Lebanon.
 - AstroDesk requests the laptop's current position from Windows after the main window opens. Windows controls the permission prompt and location-service availability.
 - If Windows cannot provide a position, AstroDesk can use BigDataCloud to estimate the city-level area from the laptop's public IP address; the UI labels this result as an IP estimate.
-- Open-Meteo resolves the coordinate's local time zone and returns current model conditions for the weather panel.
+- Open-Meteo resolves the coordinate's local time zone and returns current plus 36-hour model conditions for the weather panel and planner.
 - Missing or failed provider data is shown as `Unavailable`; AstroDesk does not silently substitute fake observations.
 
 ## Experimental ADB shutter control
@@ -249,7 +252,7 @@ Do not immediately delete the database. Close AstroDesk, back up the database to
 
 AstroDesk keeps its database, session records, phone status, screen captures, notes, logs, and photographs local. It has no account system, cloud synchronization, analytics, or telemetry.
 
-Live weather and automatic location are enabled by default for new installations and can be disabled in Settings. Windows asks for location permission before AstroDesk reads the device position. If Windows Location is unavailable, a BigDataCloud request can estimate the city-level area from the public IP address. An Open-Meteo weather request then sends the detected, estimated, or selected latitude and longitude to obtain current conditions and the local time zone, while location search sends only the entered search text to Open-Meteo's geocoding service. AstroDesk does not send preview frames, screenshots, session contents, phone status, logs, or device serials with those requests. Astronomy calculations are local. Review [SECURITY.md](SECURITY.md) for provider, USB-debugging, and external-executable trust boundaries.
+Live weather and automatic location are enabled by default for new installations and can be disabled in Settings. Windows asks for location permission before AstroDesk reads the device position. If Windows Location is unavailable, a BigDataCloud request can estimate the city-level area from the public IP address. Open-Meteo receives the detected, estimated, or selected latitude and longitude for current/hourly conditions, elevation, and time-zone data, while location search sends only the entered search text to Open-Meteo's geocoding service. AstroDesk also derives a 5° public light-pollution tile address from the coordinate and downloads that atlas tile from `djlorenz.github.io`; the exact coordinate is not placed in that request URL. AstroDesk does not send preview frames, screenshots, session contents, phone status, logs, or device serials with those requests. Astronomy and recommendation calculations are local after provider data is received. Review [SECURITY.md](SECURITY.md) for provider, USB-debugging, and external-executable trust boundaries.
 
 ## Known limitations
 
@@ -271,6 +274,7 @@ Live weather and automatic location are enabled by default for new installations
 - The release artifact is a portable, unsigned `win-x64` package. An installer, signing, and SmartScreen reputation are not provided.
 - Phone temperature values depend on what the device exposes through ADB. Unavailable values remain `Unavailable`.
 - Weather needs an internet connection; no fake fallback readings are generated.
+- Light-pollution data is an atlas estimate at roughly 30-arcsecond sampling, not a live sky-quality-meter reading. Local lamps, haze, terrain, snow, and recent development can make the actual sky different.
 
 ## Documentation
 

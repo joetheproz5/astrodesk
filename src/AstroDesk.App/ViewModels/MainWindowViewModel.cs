@@ -11,6 +11,7 @@ using AstroDesk.App.Configuration;
 using AstroDesk.App.Services;
 using AstroDesk.Capture.Geometry;
 using AstroDesk.Capture.Histogram;
+using AstroDesk.Core.Calculations;
 using AstroDesk.Core.Entities;
 using AstroDesk.Core.Enums;
 using AstroDesk.Core.Interfaces;
@@ -35,6 +36,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private readonly IDeviceMonitor _deviceMonitor;
     private readonly IWeatherProvider _weatherProvider;
     private readonly IAstronomyProvider _astronomyProvider;
+    private readonly ILightPollutionProvider _lightPollutionProvider;
     private readonly ILocationProvider _locationProvider;
     private readonly IExposureTimerService _exposureTimer;
     private readonly IDeviceToolbarController _toolbar;
@@ -51,6 +53,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private ShootingSession? _activeSession;
     private WeatherConditions? _latestWeather;
     private AstronomyConditions? _latestAstronomy;
+    private LightPollutionConditions? _latestLightPollution;
     private string? _lastScreenshotPath;
     private int _lastTimerCompletedFrames;
     private int _lastExperimentalTimerFrame;
@@ -68,6 +71,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         IDeviceMonitor deviceMonitor,
         IWeatherProvider weatherProvider,
         IAstronomyProvider astronomyProvider,
+        ILightPollutionProvider lightPollutionProvider,
         ILocationProvider locationProvider,
         IExposureTimerService exposureTimer,
         IDeviceToolbarController toolbar,
@@ -85,6 +89,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _deviceMonitor = deviceMonitor;
         _weatherProvider = weatherProvider;
         _astronomyProvider = astronomyProvider;
+        _lightPollutionProvider = lightPollutionProvider;
         _locationProvider = locationProvider;
         _exposureTimer = exposureTimer;
         _toolbar = toolbar;
@@ -339,6 +344,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private string _timeZoneText = "Detecting time zone…";
 
     [ObservableProperty]
+    private string _altitudeText = "Unavailable";
+
+    [ObservableProperty]
     private string _cameraName = "Samsung Galaxy S23 Ultra";
 
     [ObservableProperty]
@@ -450,10 +458,34 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private string _visibilityText = "Unavailable";
 
     [ObservableProperty]
+    private string _precipitationText = "Unavailable";
+
+    [ObservableProperty]
     private string _dewPointText = "Unavailable";
 
     [ObservableProperty]
     private string _dewRiskText = "Unavailable";
+
+    [ObservableProperty]
+    private string _shootingRecommendationText = "Forecast unavailable";
+
+    [ObservableProperty]
+    private string _shootingScoreText = "Unavailable";
+
+    [ObservableProperty]
+    private string _bestShootingWindowText = "Unavailable";
+
+    [ObservableProperty]
+    private string _shootingAdviceText = "Waiting for an hourly forecast.";
+
+    [ObservableProperty]
+    private string _shootQualityLevel = ObservingQuality.Unavailable.ToString();
+
+    [ObservableProperty]
+    private string _lightPollutionText = "Unavailable";
+
+    [ObservableProperty]
+    private string _lightPollutionDetailText = "Live atlas data unavailable";
 
     [ObservableProperty]
     private string _sunsetText = "Unavailable";
@@ -481,6 +513,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     [ObservableProperty]
     private string _moonAltitudeText = "Unavailable";
+
+    [ObservableProperty]
+    private string _moonPositionText = "Unavailable";
 
     [ObservableProperty]
     private string _darkSkyWindowText = "Unavailable";
@@ -1269,10 +1304,17 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                     .GetCurrentAsync(coordinate, cancellationToken)
                     .ConfigureAwait(true)
                 : null;
-            AstronomyConditions? astronomy = await _astronomyProvider.GetConditionsAsync(
+            Task<AstronomyConditions?> astronomyTask = _astronomyProvider.GetConditionsAsync(
                 coordinate,
                 GetLocationDate(weather?.TimeZoneId ?? SelectedLocation?.TimeZoneId),
-                cancellationToken).ConfigureAwait(true);
+                cancellationToken);
+            Task<LightPollutionConditions?> lightPollutionTask = EnableNetworkConditions
+                ? _lightPollutionProvider.GetConditionsAsync(coordinate, cancellationToken)
+                : Task.FromResult<LightPollutionConditions?>(null);
+            await Task.WhenAll(astronomyTask, lightPollutionTask).ConfigureAwait(true);
+            AstronomyConditions? astronomy = await astronomyTask.ConfigureAwait(true);
+            LightPollutionConditions? lightPollution =
+                await lightPollutionTask.ConfigureAwait(true);
 
             if (requestVersion != Volatile.Read(ref _conditionsRequestVersion))
             {
@@ -1281,6 +1323,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
             _latestWeather = weather;
             _latestAstronomy = astronomy;
+            _latestLightPollution = lightPollution;
             UpdateConditionsDisplay();
             ConditionsUpdatedText = BuildConditionsUpdatedText(
                 _latestWeather,
@@ -1714,6 +1757,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(IsHistory));
         OnPropertyChanged(nameof(IsSettings));
     }
+
+    partial void OnSelectedSessionTypeChanged(SessionType value) =>
+        UpdateObservingPlanDisplay();
 
     partial void OnSelectedLocationChanged(LocationOption? value)
     {
@@ -2183,26 +2229,72 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         CloudCoverText = Format(weather?.CloudCoverPercent, "0", "%");
         VisibilityText = Format(weather?.VisibilityKilometers, "0.0", " km");
         DewPointText = Format(weather?.DewPointCelsius, "0.0", " °C");
+        HourlyWeatherConditions? nearestForecast = weather?.HourlyForecast?
+            .OrderBy(hour => Math.Abs((hour.Time - weather.ObservedAt).TotalMinutes))
+            .FirstOrDefault();
+        PrecipitationText = Format(
+            nearestForecast?.PrecipitationProbabilityPercent,
+            "0",
+            "%");
         DewRiskText = weather?.DewRisk.ToString() ?? "Unavailable";
+        AltitudeText = Format(
+            SelectedLocation?.ElevationMeters ?? weather?.ElevationMeters,
+            "0",
+            " m above sea level");
         TimeZoneText = FormatTimeZoneLabel(
             weather?.TimeZoneId ?? SelectedLocation?.TimeZoneId,
             weather?.TimeZoneAbbreviation);
 
         AstronomyConditions? astronomy = _latestAstronomy;
-        SunsetText = FormatTime(astronomy?.Sunset);
-        AstronomicalDuskText = FormatTime(astronomy?.EndOfAstronomicalTwilight);
-        SunriseText = FormatTime(astronomy?.Sunrise);
-        AstronomicalDawnText = FormatTime(astronomy?.StartOfAstronomicalTwilight);
+        SunsetText = FormatLocationTime(astronomy?.Sunset);
+        AstronomicalDuskText = FormatLocationTime(astronomy?.EndOfAstronomicalTwilight);
+        SunriseText = FormatLocationTime(astronomy?.Sunrise);
+        AstronomicalDawnText = FormatLocationTime(astronomy?.StartOfAstronomicalTwilight);
         MoonPhaseText = astronomy?.MoonPhase ?? "Unavailable";
         MoonIlluminationText = Format(astronomy?.MoonIlluminationPercent, "0", "%");
-        MoonriseText = FormatTime(astronomy?.Moonrise);
-        MoonsetText = FormatTime(astronomy?.Moonset);
+        MoonriseText = FormatLocationTime(astronomy?.Moonrise);
+        MoonsetText = FormatLocationTime(astronomy?.Moonset);
         MoonAltitudeText = Format(astronomy?.MoonAltitudeDegrees, "0.0", "°");
+        MoonPositionText =
+            astronomy?.MoonAltitudeDegrees is { } moonAltitude &&
+            astronomy.MoonAzimuthDegrees is { } moonAzimuth
+                ? $"{moonAltitude:0.0}° high · {astronomy.MoonDirection ?? "?"} ({moonAzimuth:0}°)"
+                : "Unavailable";
         DarkSkyWindowText =
             astronomy?.DarkSkyWindowStart is { } darkStart &&
             astronomy.DarkSkyWindowEnd is { } darkEnd
-                ? $"{darkStart.ToLocalTime():HH:mm} – {darkEnd.ToLocalTime():HH:mm}"
+                ? $"{FormatLocationTime(darkStart)} – {FormatLocationTime(darkEnd)}"
                 : "Unavailable";
+
+        LightPollutionConditions? lightPollution = _latestLightPollution;
+        LightPollutionText = lightPollution is null
+            ? "Unavailable"
+            : $"Zone {lightPollution.Zone} · {lightPollution.MagnitudesPerSquareArcSecond:0.0} mag/arcsec²";
+        LightPollutionDetailText = lightPollution is null
+            ? "Live atlas data unavailable"
+            : $"{lightPollution.Description} · artificial glow {lightPollution.ArtificialBrightnessRatio:0.#}× natural · {lightPollution.DataYear} atlas";
+
+        UpdateObservingPlanDisplay();
+    }
+
+    private void UpdateObservingPlanDisplay()
+    {
+        ObservingPlan plan = AstrophotographyPlanner.CreatePlan(
+            SelectedSessionType,
+            _latestWeather,
+            _latestAstronomy,
+            _latestLightPollution);
+        ShootQualityLevel = plan.Quality.ToString();
+        ShootingRecommendationText = plan.Headline;
+        ShootingScoreText = plan.Quality == ObservingQuality.Unavailable
+            ? "Unavailable"
+            : $"{plan.Score}/100";
+        BestShootingWindowText =
+            plan.BestWindowStart is { } start &&
+            plan.BestWindowEnd is { } end
+                ? $"{FormatLocationTime(start)} – {FormatLocationTime(end)}"
+                : "Unavailable";
+        ShootingAdviceText = plan.Details;
     }
 
     private void ApplyLatestPreviewFrame()
@@ -2467,8 +2559,35 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             ? "Unavailable"
             : value.Value.ToString(format, CultureInfo.CurrentCulture) + suffix;
 
-    private static string FormatTime(DateTimeOffset? value) =>
-        value?.ToLocalTime().ToString("HH:mm", CultureInfo.CurrentCulture) ?? "Unavailable";
+    private string FormatLocationTime(DateTimeOffset? value)
+    {
+        if (value is null)
+        {
+            return "Unavailable";
+        }
+
+        string? timeZoneId = _latestWeather?.TimeZoneId ?? SelectedLocation?.TimeZoneId;
+        if (!string.IsNullOrWhiteSpace(timeZoneId))
+        {
+            try
+            {
+                TimeZoneInfo timeZone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+                return TimeZoneInfo.ConvertTime(value.Value, timeZone)
+                    .ToString("HH:mm", CultureInfo.CurrentCulture);
+            }
+            catch (TimeZoneNotFoundException)
+            {
+            }
+            catch (InvalidTimeZoneException)
+            {
+            }
+        }
+
+        return _latestWeather is not null
+            ? value.Value.ToOffset(_latestWeather.ObservedAt.Offset)
+                .ToString("HH:mm", CultureInfo.CurrentCulture)
+            : value.Value.ToLocalTime().ToString("HH:mm", CultureInfo.CurrentCulture);
+    }
 
     private static string FormatDuration(TimeSpan duration)
     {

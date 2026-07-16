@@ -94,7 +94,7 @@ Deleting the application does not automatically delete user session data.
 
 ### Network providers
 
-Online conditions and automatic location are enabled by default for new installations and can be disabled in Settings. Windows controls the precise location permission prompt. If Windows Location is unavailable, AstroDesk can contact BigDataCloud, which observes the public IP address and returns an approximate city-level location and time zone. Open-Meteo weather requests then contain the detected, estimated, or selected coordinates so the service can return current conditions and the local time zone; geocoding requests contain search text. These requests are subject to each provider's network and privacy behavior.
+Online conditions and automatic location are enabled by default for new installations and can be disabled in Settings. Windows controls the precise location permission prompt. If Windows Location is unavailable, AstroDesk can contact BigDataCloud, which observes the public IP address and returns an approximate city-level location and time zone. Open-Meteo weather requests contain the detected, estimated, or selected coordinates so the service can return current/hourly conditions, model elevation, and the local time zone; geocoding requests contain search text. AstroDesk derives a 5° public sky-brightness tile address from the coordinate and downloads that tile from the David Lorenz Light Pollution Atlas host. The exact latitude and longitude are not included in the atlas URL, although the requested tile identifies a broad geographic area. These requests are subject to each provider's network and privacy behavior.
 
 AstroDesk does not send:
 
@@ -106,9 +106,9 @@ AstroDesk does not send:
 - phone status; or
 - the session database
 
-to weather/location providers.
+to weather/location/light-pollution providers.
 
-Astronomy Engine calculations run locally. When the network is unavailable, online fields should show `Unavailable`.
+Astronomy Engine and shooting-recommendation calculations run locally after online condition data is received. When the network is unavailable, online fields should show `Unavailable`.
 
 ### Logs
 

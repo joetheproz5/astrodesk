@@ -36,7 +36,19 @@ public sealed record WeatherConditions(
     string? ProviderName,
     DateTimeOffset ObservedAt,
     string? TimeZoneId = null,
-    string? TimeZoneAbbreviation = null);
+    string? TimeZoneAbbreviation = null,
+    double? ElevationMeters = null,
+    IReadOnlyList<HourlyWeatherConditions>? HourlyForecast = null);
+
+public sealed record HourlyWeatherConditions(
+    DateTimeOffset Time,
+    double? TemperatureCelsius,
+    double? HumidityPercent,
+    double? WindSpeedKilometersPerHour,
+    double? CloudCoverPercent,
+    double? VisibilityKilometers,
+    double? DewPointCelsius,
+    double? PrecipitationProbabilityPercent);
 
 public sealed record AstronomyConditions(
     DateTimeOffset? Sunset,
@@ -51,7 +63,32 @@ public sealed record AstronomyConditions(
     DateTimeOffset? DarkSkyWindowStart,
     DateTimeOffset? DarkSkyWindowEnd,
     string? ProviderName,
+    DateTimeOffset CalculatedAt,
+    double? MoonAzimuthDegrees = null,
+    string? MoonDirection = null,
+    IReadOnlyList<HourlyMoonPosition>? MoonPositions = null);
+
+public sealed record HourlyMoonPosition(
+    DateTimeOffset Time,
+    double AltitudeDegrees,
+    double AzimuthDegrees);
+
+public sealed record LightPollutionConditions(
+    double ArtificialBrightnessRatio,
+    double MagnitudesPerSquareArcSecond,
+    string Zone,
+    string Description,
+    string ProviderName,
+    int DataYear,
     DateTimeOffset CalculatedAt);
+
+public sealed record ObservingPlan(
+    ObservingQuality Quality,
+    int Score,
+    DateTimeOffset? BestWindowStart,
+    DateTimeOffset? BestWindowEnd,
+    string Headline,
+    string Details);
 
 public sealed record LocationSearchResult(
     string DisplayName,

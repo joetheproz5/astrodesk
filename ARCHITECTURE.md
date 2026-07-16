@@ -14,6 +14,7 @@ flowchart LR
     Adb["ADB executable"]
     Phone["Android phone / Samsung Camera"]
     Weather["Open-Meteo"]
+    LightAtlas["Light Pollution Atlas tiles"]
     Astronomy["Astronomy Engine (local)"]
     Db["SQLite + session folders"]
 
@@ -23,11 +24,12 @@ flowchart LR
     App --> Adb
     Adb <--> Phone
     App --> Weather
+    App --> LightAtlas
     App --> Astronomy
     App <--> Db
 ```
 
-Online weather and geocoding are opt-in and disabled by default. When enabled, Open-Meteo receives the selected coordinates for weather and the entered search text for geocoding. Device mirroring/control, local astronomy calculations, session management, and persistence do not require an AstroDesk account or cloud service.
+Online conditions and automatic location are enabled by default and can be disabled in Settings. Open-Meteo receives the selected coordinates for weather and the entered search text for geocoding. The light-pollution provider requests a public 5° atlas tile derived from the coordinate. Device mirroring/control, local astronomy/recommendation calculations, session management, and persistence do not require an AstroDesk account or cloud service.
 
 ## Solution projects
 
@@ -184,13 +186,15 @@ Provider interfaces live in Core:
 
 - `IWeatherProvider`
 - `IAstronomyProvider`
+- `ILightPollutionProvider`
 - `ILocationProvider`
 
 Current implementations:
 
-- Open-Meteo current conditions, no API key;
+- Open-Meteo current and 36-hour conditions, elevation, and time zone, no API key;
 - Open-Meteo geocoding search, no API key;
 - Astronomy Engine calculations performed locally;
+- David Lorenz 2024 public light-pollution tiles, no API key;
 - explicit unavailable providers for disabled/unavailable cases; and
 - seeded Lebanon examples for convenience, not geographic restriction.
 
