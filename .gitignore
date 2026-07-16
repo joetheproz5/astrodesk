@@ -1,0 +1,38 @@
+## .NET
+bin/
+obj/
+artifacts/
+TestResults/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.nupkg
+*.snupkg
+
+## Visual Studio / Rider
+.vs/
+.idea/
+_ReSharper*/
+*.DotSettings.user
+
+## Runtime data
+AstroDeskData/
+logs/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+
+## Local configuration
+appsettings.Local.json
+.env
+
+## OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+## Publish output
+publish/
+installer-output/

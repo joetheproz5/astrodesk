@@ -1,0 +1,96 @@
+name: Bug report
+description: Report a reproducible AstroDesk defect
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve AstroDesk. Remove device serials, precise private locations, session notes, and sensitive screenshots before submitting.
+
+  - type: input
+    id: version
+    attributes:
+      label: AstroDesk version or commit
+      placeholder: 0.1.0 or commit SHA
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2, OS build ...
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Phone and Android version
+      placeholder: Samsung Galaxy S23 Ultra, Android ..., One UI ...
+    validations:
+      required: false
+
+  - type: input
+    id: tools
+    attributes:
+      label: ADB and scrcpy versions
+      placeholder: adb ..., scrcpy ...
+    validations:
+      required: false
+
+  - type: textarea
+    id: display
+    attributes:
+      label: Display and connection context
+      description: Include GPU, monitor layout, Windows scaling, phone orientation, USB/wireless connection, and whether preview zoom was active when relevant.
+    validations:
+      required: false
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Connect ...
+        2. Start ...
+        3. Click ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Scrubbed diagnostics
+      description: Paste only the relevant log excerpt or mapping debug values. Never include a raw ADB serial, private coordinates, notes, clipboard text, or credentials.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues and the issue seed document.
+          required: true
+        - label: I removed device serials and other private data.
+          required: true
+        - label: I can reproduce this on the version/commit listed above.
+          required: true

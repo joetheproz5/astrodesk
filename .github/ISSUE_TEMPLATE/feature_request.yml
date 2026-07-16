@@ -1,0 +1,68 @@
+name: Feature request
+description: Propose a focused improvement to the shooting workflow
+title: "[Enhancement]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        AstroDesk is intentionally focused on local phone-assisted astrophotography. It does not accept AI, account, social, analytics, advertising, telemetry, or generic astronomy-dashboard features.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Shooting-workflow problem
+      description: Describe the concrete field workflow that is difficult today.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain what the observer should see or be able to do.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include how this can preserve scrcpy, local-first storage, unavailable-value semantics, and safe defaults.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: validation
+    attributes:
+      label: Validation needed
+      options:
+        - Automated tests only
+        - Windows integration testing
+        - Physical Android hardware testing
+        - Both Windows and physical hardware testing
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This proposal does not add AI, accounts, social features, analytics, advertising, or telemetry.
+          required: true
+        - label: This proposal does not silently fabricate phone, weather, astronomy, or location data.
+          required: true
+        - label: I searched the roadmap and issue seed document.
+          required: true
