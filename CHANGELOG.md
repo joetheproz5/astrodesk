@@ -14,6 +14,14 @@ The project follows [Semantic Versioning](https://semver.org/) while pre-1.0 rel
 - A Windows Graphics Capture backend with Win32 fallback.
 - Signed installer packaging after a reproducible release process is established.
 
+## [0.1.4] - 2026-07-16
+
+### Changed
+
+- Tightened the preview and framing toolbars to five high-value controls each, moving the remaining actions into their existing touch-friendly overflow menus.
+- Reduced center-column minimum width so the Night Brief, phone preview, and Session workspace remain balanced at common Windows display-scaling settings.
+- Re-ran the visual audit against the physical rendered window after the toolbar adjustment.
+
 ## [0.1.3] - 2026-07-16
 
 ### Changed
