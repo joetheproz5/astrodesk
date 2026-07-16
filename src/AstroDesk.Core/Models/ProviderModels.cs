@@ -34,7 +34,9 @@ public sealed record WeatherConditions(
     double? DewPointCelsius,
     DewRisk DewRisk,
     string? ProviderName,
-    DateTimeOffset ObservedAt);
+    DateTimeOffset ObservedAt,
+    string? TimeZoneId = null,
+    string? TimeZoneAbbreviation = null);
 
 public sealed record AstronomyConditions(
     DateTimeOffset? Sunset,

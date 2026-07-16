@@ -176,10 +176,12 @@ Before copying or backing up the live SQLite database, close AstroDesk and keep 
 
 ## Weather, astronomy, and location
 
-- Optional weather and location search use Open-Meteo and require internet access, but no paid key or account. They are disabled by default.
+- Live weather and location search use Open-Meteo and require internet access, but no paid key or account. They are enabled by default for new installations and can be disabled in Settings.
 - Moon and twilight calculations run locally with Astronomy Engine.
 - Manual coordinates and seeded Lebanon examples are supported without restricting the app to Lebanon.
-- Current-device location is unavailable until a Windows location source is implemented and permission is granted.
+- AstroDesk requests the laptop's current position from Windows after the main window opens. Windows controls the permission prompt and location-service availability.
+- If Windows cannot provide a position, AstroDesk can use BigDataCloud to estimate the city-level area from the laptop's public IP address; the UI labels this result as an IP estimate.
+- Open-Meteo resolves the coordinate's local time zone and returns current model conditions for the weather panel.
 - Missing or failed provider data is shown as `Unavailable`; AstroDesk does not silently substitute fake observations.
 
 ## Experimental ADB shutter control
@@ -237,7 +239,7 @@ Select the intended device in AstroDesk. At the command line, use `adb devices -
 
 ### Weather is unavailable
 
-Enable online conditions in Settings before using Open-Meteo weather or location search. Those features require internet access; astronomy calculations remain local. Provider failure should not stop the session workflow.
+Confirm that **Use live weather and automatic Windows location** is enabled in Settings and that the laptop has internet access. Select **Locate me** to retry. If Windows denied access or Location services are off, select **Location settings**, enable the required Windows setting, and retry. Search or manual coordinates remain available as fallbacks. Astronomy calculations remain local, and provider failure does not stop the session workflow.
 
 ### Database startup fails
 
@@ -247,7 +249,7 @@ Do not immediately delete the database. Close AstroDesk, back up the database to
 
 AstroDesk keeps its database, session records, phone status, screen captures, notes, logs, and photographs local. It has no account system, cloud synchronization, analytics, or telemetry.
 
-Online weather and location search are opt-in and disabled by default. When enabled, an Open-Meteo weather request sends the selected latitude and longitude, while location search sends the entered search text to Open-Meteo's geocoding service. AstroDesk does not send preview frames, screenshots, session contents, phone status, logs, or device serials with those requests. Astronomy calculations are local. Review [SECURITY.md](SECURITY.md) for provider, USB-debugging, and external-executable trust boundaries.
+Live weather and automatic location are enabled by default for new installations and can be disabled in Settings. Windows asks for location permission before AstroDesk reads the device position. If Windows Location is unavailable, a BigDataCloud request can estimate the city-level area from the public IP address. An Open-Meteo weather request then sends the detected, estimated, or selected latitude and longitude to obtain current conditions and the local time zone, while location search sends only the entered search text to Open-Meteo's geocoding service. AstroDesk does not send preview frames, screenshots, session contents, phone status, logs, or device serials with those requests. Astronomy calculations are local. Review [SECURITY.md](SECURITY.md) for provider, USB-debugging, and external-executable trust boundaries.
 
 ## Known limitations
 
@@ -259,7 +261,7 @@ Online weather and location search are opt-in and disabled by default. When enab
 - The frame counter is manual; automatic Samsung Camera shot detection is not claimed.
 - ADB shutter-coordinate control is opt-in and experimental.
 - Preview screenshots are not full-resolution phone photos.
-- Current-device location is not implemented; manual coordinates, saved locations, and search are the supported paths.
+- Current-device accuracy and availability depend on Windows Location services, hardware, Wi-Fi positioning, user permission, and system policy. The public-IP fallback is deliberately coarse and can be wrong when using VPNs, mobile networks, proxies, or ISP gateways; search and manual coordinates remain available.
 - Existing/seeded locations can be loaded and search results used, but complete save/edit/delete management for observing locations is unfinished.
 - Planned/historical astronomy views need a consistent requested-date instant for moon phase/altitude as well as twilight calculations.
 - Preview “fullscreen” is an in-window distraction-free layout, not a verified borderless/exclusive Windows fullscreen mode.

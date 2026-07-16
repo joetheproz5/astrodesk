@@ -150,7 +150,10 @@
 
                     <Border Grid.Column="0" Style="{StaticResource PanelCard}" Padding="0">
                         <ScrollViewer HorizontalScrollBarVisibility="Disabled"
-                                      VerticalScrollBarVisibility="Auto">
+                                      VerticalScrollBarVisibility="Auto"
+                                      PanningMode="VerticalFirst"
+                                      PanningDeceleration="0.001"
+                                      PanningRatio="1">
                             <StackPanel Margin="14">
                                 <TextBlock Text="PHONE STATUS" Style="{StaticResource SectionTitle}" />
                                 <TextBlock Text="{Binding ConnectionStatus}" Style="{StaticResource MutedText}" Margin="0,0,0,8" />
@@ -194,10 +197,35 @@
                                             MinWidth="28" />
                                 </DockPanel>
 
-                                <TextBlock Text="Observing location" Style="{StaticResource FieldLabel}" />
+                                <TextBlock Text="YOUR LOCATION" Style="{StaticResource SectionTitle}" />
+                                <TextBlock Text="{Binding LocationStatusText}"
+                                           FontWeight="SemiBold"
+                                           TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding LocationCoordinateText}"
+                                           Style="{StaticResource MutedText}"
+                                           Margin="0,4,0,0" />
+                                <TextBlock Text="{Binding TimeZoneText, StringFormat=Time zone: {0}}"
+                                           Style="{StaticResource MutedText}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,3,0,0" />
+                                <UniformGrid Columns="2" Margin="0,8,0,0">
+                                    <Button Content="Locate me"
+                                            Command="{Binding LocateCurrentUserCommand}"
+                                            Style="{StaticResource AccentButton}"
+                                            Margin="0,0,4,0" />
+                                    <Button Content="Location settings"
+                                            Command="{Binding OpenLocationSettingsCommand}"
+                                            Style="{StaticResource ToolbarButton}"
+                                            Margin="4,0,0,0" />
+                                </UniformGrid>
+
+                                <TextBlock Text="Fallback location"
+                                           Style="{StaticResource FieldLabel}"
+                                           Margin="0,12,0,0" />
                                 <ComboBox ItemsSource="{Binding Locations}"
                                           SelectedItem="{Binding SelectedLocation}"
-                                          DisplayMemberPath="Name" />
+                                          DisplayMemberPath="Name"
+                                          ToolTip="Used when Windows location is unavailable or when you select a different observing area." />
                                 <Grid Margin="0,8,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -211,9 +239,9 @@
                                             Command="{Binding SearchLocationsCommand}"
                                             Style="{StaticResource ToolbarButton}" />
                                 </Grid>
-                                <TextBlock Text="{Binding SelectedLocation.CoordinateText}"
-                                           Style="{StaticResource MutedText}"
-                                           Margin="0,5,0,0" />
+                                <TextBlock Text="Manual coordinates"
+                                           Style="{StaticResource FieldLabel}"
+                                           Margin="0,7,0,0" />
                                 <Grid Margin="0,6,0,0">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -329,7 +357,10 @@
 
                         <Border Style="{StaticResource PanelCard}" Padding="8">
                             <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                                          VerticalScrollBarVisibility="Disabled">
+                                          VerticalScrollBarVisibility="Disabled"
+                                          PanningMode="HorizontalFirst"
+                                          PanningDeceleration="0.001"
+                                          PanningRatio="1">
                                 <StackPanel Orientation="Horizontal">
                                     <Button Content="Start"
                                             Command="{Binding StartPreviewCommand}"
@@ -471,7 +502,10 @@
 
                         <Border Grid.Row="4" Style="{StaticResource PanelCard}" Padding="8">
                             <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                                          VerticalScrollBarVisibility="Disabled">
+                                          VerticalScrollBarVisibility="Disabled"
+                                          PanningMode="HorizontalFirst"
+                                          PanningDeceleration="0.001"
+                                          PanningRatio="1">
                                 <StackPanel Orientation="Horizontal">
                                     <ToggleButton Content="Grid" IsChecked="{Binding RuleOfThirds}" Margin="0,0,5,0" Padding="9,5" />
                                     <ToggleButton Content="Crosshair" IsChecked="{Binding Crosshair}" Margin="0,0,5,0" Padding="9,5" />
@@ -498,7 +532,10 @@
 
                     <Border Grid.Column="4" Style="{StaticResource PanelCard}" Padding="0">
                         <ScrollViewer HorizontalScrollBarVisibility="Disabled"
-                                      VerticalScrollBarVisibility="Auto">
+                                      VerticalScrollBarVisibility="Auto"
+                                      PanningMode="VerticalFirst"
+                                      PanningDeceleration="0.001"
+                                      PanningRatio="1">
                             <StackPanel Margin="14">
                                 <DockPanel>
                                     <TextBlock Text="SHOOTING SESSION" Style="{StaticResource SectionTitle}" />
@@ -835,7 +872,10 @@
                             </Grid.RowDefinitions>
                         <ScrollViewer Grid.Row="0"
                                       HorizontalScrollBarVisibility="Disabled"
-                                      VerticalScrollBarVisibility="Auto">
+                                      VerticalScrollBarVisibility="Auto"
+                                      PanningMode="VerticalFirst"
+                                      PanningDeceleration="0.001"
+                                      PanningRatio="1">
                             <ScrollViewer.Style>
                                 <Style TargetType="ScrollViewer">
                                     <Setter Property="Visibility" Value="Visible" />
@@ -984,7 +1024,10 @@
             <Grid Visibility="{Binding IsSettings, Converter={StaticResource BoolToVisibility}}"
                   Margin="14">
                 <ScrollViewer HorizontalScrollBarVisibility="Disabled"
-                              VerticalScrollBarVisibility="Auto">
+                              VerticalScrollBarVisibility="Auto"
+                              PanningMode="VerticalFirst"
+                              PanningDeceleration="0.001"
+                              PanningRatio="1">
                     <Grid MaxWidth="1180" HorizontalAlignment="Center">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -1065,10 +1108,10 @@
                                     <CheckBox Content="Include framing overlays in preview screenshots"
                                               IsChecked="{Binding IncludeOverlaysInScreenshot}"
                                               Margin="0,10,0,0" />
-                                    <CheckBox Content="Enable Open-Meteo weather and online location search"
+                                    <CheckBox Content="Use live weather and automatic Windows location"
                                               IsChecked="{Binding EnableNetworkConditions}"
                                               Margin="0,8,0,0" />
-                                    <TextBlock Text="Off by default. When enabled, coordinates or search text are sent only to Open-Meteo for the requested result. Screenshots, phone status, sessions, and logs are never uploaded. AstroDesk has no telemetry or account."
+                                    <TextBlock Text="On by default. Windows location is tried first. If it is unavailable, BigDataCloud may estimate the area from the public IP address. Coordinates are sent to Open-Meteo to resolve the local time zone and current weather. Search text is sent only when you search. Screenshots, phone status, sessions, and logs are never uploaded."
                                                Style="{StaticResource MutedText}"
                                                Margin="0,10,0,0" />
                                 </StackPanel>
@@ -1095,7 +1138,7 @@
                                             <TextBox Text="{Binding DefaultFrameCount}" />
                                         </StackPanel>
                                     </UniformGrid>
-                                    <TextBlock Text="Default location name" Style="{StaticResource FieldLabel}" />
+                                    <TextBlock Text="Fallback location name" Style="{StaticResource FieldLabel}" />
                                     <TextBox Text="{Binding DefaultLocationName}" />
                                 </StackPanel>
                             </Border>

@@ -137,19 +137,25 @@ public partial class App : Application
             {
                 client.BaseAddress = new Uri("https://api.open-meteo.com/");
                 client.Timeout = TimeSpan.FromSeconds(12);
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("AstroDesk/0.1");
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("AstroDesk/0.1.1");
             });
         builder.Services.AddHttpClient<OpenMeteoLocationProvider>(
             client =>
             {
                 client.BaseAddress = new Uri("https://geocoding-api.open-meteo.com/");
                 client.Timeout = TimeSpan.FromSeconds(12);
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("AstroDesk/0.1");
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("AstroDesk/0.1.1");
+            });
+        builder.Services.AddHttpClient<BigDataCloudIpLocationProvider>(
+            client =>
+            {
+                client.BaseAddress = new Uri("https://api.bigdatacloud.net/");
+                client.Timeout = TimeSpan.FromSeconds(12);
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("AstroDesk/0.1.1");
             });
         builder.Services.AddTransient<IWeatherProvider>(
             provider => provider.GetRequiredService<OpenMeteoWeatherProvider>());
-        builder.Services.AddTransient<ILocationProvider>(
-            provider => provider.GetRequiredService<OpenMeteoLocationProvider>());
+        builder.Services.AddTransient<ILocationProvider, WindowsLocationProvider>();
         builder.Services.AddSingleton<IAstronomyProvider, AstronomyEngineProvider>();
 
         builder.Services.AddSingleton(

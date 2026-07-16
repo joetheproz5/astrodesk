@@ -14,6 +14,22 @@ The project follows [Semantic Versioning](https://semver.org/) while pre-1.0 rel
 - A Windows Graphics Capture backend with Win32 fallback.
 - Signed installer packaging after a reproducible release process is established.
 
+## [0.1.1] - 2026-07-16
+
+### Added
+
+- Automatic current-device location through the Windows location service with an in-app shortcut to Windows Location settings.
+- Clearly labeled coarse public-IP location fallback through BigDataCloud when Windows Location is unavailable.
+- Automatic Open-Meteo time-zone resolution for the detected or selected coordinates.
+- Touchscreen panning with inertia for dashboard side panels, settings, history details, lists, drop-downs, and horizontal toolbars.
+- Provider tests covering live weather values, visibility conversion, observation offsets, and time-zone metadata.
+
+### Changed
+
+- Live weather and automatic location are enabled by default for new installations; Windows still controls location permission and the feature can be disabled in Settings.
+- The conditions panel now leads with the laptop's current location, coordinates, and time zone while keeping search and manual coordinates as fallbacks.
+- Weather update text reports the provider observation time instead of only the laptop refresh time.
+
 ## [0.1.0] - 2026-07-16
 
 ### Added

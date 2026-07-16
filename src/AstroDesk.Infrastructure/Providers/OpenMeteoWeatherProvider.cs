@@ -47,13 +47,9 @@ public sealed class OpenMeteoWeatherProvider(
                 ? MeteorologyCalculations.AssessDewRisk(temperature, dewPoint)
                 : DewRisk.Unavailable;
 
-            DateTimeOffset observedAt = DateTimeOffset.TryParse(
+            DateTimeOffset observedAt = ParseObservedAt(
                 current.Time,
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.AssumeUniversal,
-                out DateTimeOffset parsed)
-                ? parsed
-                : DateTimeOffset.UtcNow;
+                response?.UtcOffsetSeconds);
 
             return new WeatherConditions(
                 current.Temperature,
@@ -64,7 +60,9 @@ public sealed class OpenMeteoWeatherProvider(
                 current.DewPoint,
                 dewRisk,
                 Name,
-                observedAt);
+                observedAt,
+                response?.TimeZone,
+                response?.TimeZoneAbbreviation);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -84,6 +82,15 @@ public sealed class OpenMeteoWeatherProvider(
     {
         [JsonPropertyName("current")]
         public OpenMeteoCurrent? Current { get; init; }
+
+        [JsonPropertyName("utc_offset_seconds")]
+        public int? UtcOffsetSeconds { get; init; }
+
+        [JsonPropertyName("timezone")]
+        public string? TimeZone { get; init; }
+
+        [JsonPropertyName("timezone_abbreviation")]
+        public string? TimeZoneAbbreviation { get; init; }
     }
 
     private sealed class OpenMeteoCurrent
@@ -108,5 +115,23 @@ public sealed class OpenMeteoWeatherProvider(
 
         [JsonPropertyName("dew_point_2m")]
         public double? DewPoint { get; init; }
+    }
+
+    private static DateTimeOffset ParseObservedAt(string? value, int? utcOffsetSeconds)
+    {
+        if (string.IsNullOrWhiteSpace(value) ||
+            !DateTime.TryParse(
+                value,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces,
+                out DateTime localTime))
+        {
+            return DateTimeOffset.UtcNow;
+        }
+
+        int seconds = Math.Clamp(utcOffsetSeconds ?? 0, -18 * 60 * 60, 18 * 60 * 60);
+        return new DateTimeOffset(
+            DateTime.SpecifyKind(localTime, DateTimeKind.Unspecified),
+            TimeSpan.FromSeconds(seconds));
     }
 }
