@@ -737,7 +737,48 @@
                                     <ColumnDefinition Width="12" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
-                                <StackPanel VerticalAlignment="Center">
+                                <WrapPanel Grid.ColumnSpan="3">
+                                    <Button Content="Start preview"
+                                            Command="{Binding StartPreviewCommand}"
+                                            Style="{StaticResource AccentButton}"
+                                            Margin="0,0,6,0" />
+                                    <Button Content="← Back"
+                                            Command="{Binding BackCommand}"
+                                            Style="{StaticResource ToolbarButton}"
+                                            Margin="0,0,6,0" />
+                                    <Button Content="⌂ Home"
+                                            Command="{Binding HomeCommand}"
+                                            Style="{StaticResource ToolbarButton}"
+                                            Margin="0,0,6,0" />
+                                    <Button Content="Screenshot"
+                                            Command="{Binding TakeScreenshotCommand}"
+                                            Style="{StaticResource ToolbarButton}"
+                                            Margin="0,0,6,0" />
+                                    <Button Content="More ···"
+                                            Style="{StaticResource ToolbarButton}"
+                                            Click="OpenButtonContextMenu_OnClick">
+                                        <Button.ContextMenu>
+                                            <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                <MenuItem Header="Reconnect preview" Command="{Binding ReconnectPreviewCommand}" />
+                                                <MenuItem Header="Stop preview" Command="{Binding StopPreviewCommand}" />
+                                                <MenuItem Header="Rotate phone" Command="{Binding RotatePhoneCommand}" />
+                                                <MenuItem Header="Fullscreen preview" Command="{Binding TogglePreviewFullscreenCommand}" />
+                                                <Separator />
+                                                <MenuItem Header="Recent apps" Command="{Binding RecentAppsCommand}" />
+                                                <MenuItem Header="Volume down" Command="{Binding VolumeDownCommand}" />
+                                                <MenuItem Header="Volume up" Command="{Binding VolumeUpCommand}" />
+                                                <MenuItem Header="Power button" Command="{Binding PowerCommand}" />
+                                                <Separator />
+                                                <MenuItem Header="Copy preview" Command="{Binding CopyPreviewToClipboardCommand}" />
+                                                <MenuItem Header="Open screenshots folder" Command="{Binding OpenScreenshotFolderCommand}" />
+                                                <MenuItem Header="Paste clipboard to phone" Command="{Binding PasteClipboardCommand}" />
+                                                <MenuItem Header="Keep phone awake" Command="{Binding KeepPhoneAwakeCommand}" />
+                                            </ContextMenu>
+                                        </Button.ContextMenu>
+                                    </Button>
+                                </WrapPanel>
+                                <StackPanel VerticalAlignment="Center"
+                                            Visibility="Collapsed">
                                     <TextBlock Text="PHONE PREVIEW"
                                                Style="{StaticResource SectionTitle}"
                                                Margin="0,0,0,3" />
@@ -750,6 +791,7 @@
                                 <ScrollViewer Grid.Column="2"
                                               HorizontalScrollBarVisibility="Hidden"
                                               VerticalScrollBarVisibility="Disabled"
+                                              Visibility="Collapsed"
                                               PanningMode="HorizontalFirst"
                                               PanningDeceleration="0.001"
                                               PanningRatio="1">
@@ -960,7 +1002,66 @@
                                     <ColumnDefinition Width="12" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
-                                <StackPanel VerticalAlignment="Center">
+                                <WrapPanel Grid.ColumnSpan="3">
+                                    <ToggleButton Content="Grid"
+                                                  IsChecked="{Binding RuleOfThirds}"
+                                                  Margin="0,0,6,0" />
+                                    <ToggleButton Content="Crosshair"
+                                                  IsChecked="{Binding Crosshair}"
+                                                  Margin="0,0,6,0" />
+                                    <ToggleButton Content="Focus"
+                                                  IsChecked="{Binding FocusMagnifier}"
+                                                  Margin="0,0,6,0" />
+                                    <Button Content="2×"
+                                            Command="{Binding Zoom2Command}"
+                                            Style="{StaticResource CompactButton}"
+                                            Margin="0,0,6,0" />
+                                    <Button Content="More ···"
+                                            Style="{StaticResource ToolbarButton}"
+                                            Click="OpenButtonContextMenu_OnClick">
+                                        <Button.ContextMenu>
+                                            <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                <MenuItem Header="Horizon line"
+                                                          IsCheckable="True"
+                                                          IsChecked="{Binding HorizonLine, Mode=TwoWay}" />
+                                                <MenuItem Header="Diagonal guides"
+                                                          IsCheckable="True"
+                                                          IsChecked="{Binding DiagonalGuides, Mode=TwoWay}" />
+                                                <MenuItem Header="Safe area"
+                                                          IsCheckable="True"
+                                                          IsChecked="{Binding SafeArea, Mode=TwoWay}" />
+                                                <MenuItem Header="Custom rectangle"
+                                                          IsCheckable="True"
+                                                          IsChecked="{Binding CustomRectangle, Mode=TwoWay}" />
+                                                <MenuItem Header="Circle overlay"
+                                                          IsCheckable="True"
+                                                          IsChecked="{Binding CircleOverlay, Mode=TwoWay}" />
+                                                <Separator />
+                                                <MenuItem Header="Show histogram"
+                                                          IsCheckable="True"
+                                                          IsChecked="{Binding ShowHistogram, Mode=TwoWay}" />
+                                                <MenuItem Header="Freeze preview"
+                                                          Command="{Binding ToggleFreezeCommand}" />
+                                                <MenuItem Header="1× zoom" Command="{Binding Zoom1Command}" />
+                                                <MenuItem Header="4× zoom" Command="{Binding Zoom4Command}" />
+                                                <MenuItem Header="8× zoom" Command="{Binding Zoom8Command}" />
+                                                <MenuItem Header="Pixel perfect"
+                                                          IsCheckable="True"
+                                                          IsChecked="{Binding PixelPerfect, Mode=TwoWay}" />
+                                                <MenuItem Header="Histogram over preview"
+                                                          IsCheckable="True"
+                                                          IsChecked="{Binding HistogramOverlay, Mode=TwoWay}" />
+                                                <MenuItem Header="Hide every overlay"
+                                                          Command="{Binding HideAllOverlaysCommand}" />
+                                                <Separator />
+                                                <MenuItem Header="Cycle night mode"
+                                                          Command="{Binding CycleNightModeCommand}" />
+                                            </ContextMenu>
+                                        </Button.ContextMenu>
+                                    </Button>
+                                </WrapPanel>
+                                <StackPanel VerticalAlignment="Center"
+                                            Visibility="Collapsed">
                                     <TextBlock Text="FRAMING"
                                                Style="{StaticResource SectionTitle}"
                                                Margin="0,0,0,3" />
@@ -970,6 +1071,7 @@
                                 <ScrollViewer Grid.Column="2"
                                               HorizontalScrollBarVisibility="Hidden"
                                               VerticalScrollBarVisibility="Disabled"
+                                              Visibility="Collapsed"
                                               PanningMode="HorizontalFirst"
                                               PanningDeceleration="0.001"
                                               PanningRatio="1">
