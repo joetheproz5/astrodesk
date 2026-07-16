@@ -1,8 +1,8 @@
-# GitHub issue and label seed
+# GitHub issue and label index
 
-GitHub CLI is not installed and no authenticated public repository is available in the current development environment. These issues and labels should be created after the `astrodesk` repository exists. Do not treat the seed IDs below as existing GitHub issue numbers.
+The requested labels and all 23 unfinished or experimental work items are published in the public [`joetheproz5/astrodesk`](https://github.com/joetheproz5/astrodesk) repository. The ASTRO IDs remain stable planning identifiers; each issue heading below links to its live GitHub issue.
 
-## Requested labels
+## Published labels
 
 | Label           | Color    | Description                                                         |
 | --------------- | -------- | ------------------------------------------------------------------- |
@@ -18,11 +18,11 @@ GitHub CLI is not installed and no authenticated public repository is available 
 | `testing`       | `bfdadc` | Automated, Windows integration, hardware, or soak validation        |
 | `documentation` | `0075ca` | User, developer, integration, or release documentation              |
 
-Create labels before issues so templates and seeded issues can apply them.
+These labels are active in the repository and applied to the linked issues.
 
 ## Release-blocking issues
 
-### ASTRO-001 — Validate embedded preview and control on the target S23 Ultra/ThinkPad setup
+### [ASTRO-001 — Validate embedded preview and control on the target S23 Ultra/ThinkPad setup](https://github.com/joetheproz5/astrodesk/issues/2)
 
 Labels: `testing`, `scrcpy`, `adb`, `capture`, `input`
 
@@ -38,7 +38,7 @@ Acceptance criteria:
 - Run a two-hour preview/session soak and record FPS, CPU, and memory behavior.
 - File separate issues for distinct failures.
 
-### ASTRO-005 — Validate astronomy calculations against the requested session date
+### [ASTRO-005 — Validate astronomy calculations against the requested session date](https://github.com/joetheproz5/astrodesk/issues/3)
 
 Labels: `bug`, `astronomy`, `testing`
 
@@ -51,7 +51,7 @@ Acceptance criteria:
 - Add known-location/date tests and boundary tests around midnight/DST.
 - Document UTC/local conversion in exports.
 
-### ASTRO-025 — Make multi-key settings persistence atomic and complete validation
+### [ASTRO-025 — Make multi-key settings persistence atomic and complete validation](https://github.com/joetheproz5/astrodesk/issues/4)
 
 Labels: `bug`, `ui`, `testing`
 
@@ -64,7 +64,7 @@ Acceptance criteria:
 - Keep folder probing non-destructive and retain the previous active paths when activation fails.
 - Add tests for invalid values, unwritable paths, and partial repository failure.
 
-### ASTRO-031 — Correct exposure-timer drift and state reporting
+### [ASTRO-031 — Correct exposure-timer drift and state reporting](https://github.com/joetheproz5/astrodesk/issues/5)
 
 Labels: `bug`, `ui`, `testing`
 
@@ -76,7 +76,7 @@ Acceptance criteria:
 - Return/observe whether pause and resume transitions were accepted.
 - Add fake-time tests for pause/resume, long durations, completion, and cancellation.
 
-### ASTRO-032 — Complete red-only theming
+### [ASTRO-032 — Complete red-only theming](https://github.com/joetheproz5/astrodesk/issues/6)
 
 Labels: `bug`, `ui`, `testing`
 
@@ -89,7 +89,7 @@ Acceptance criteria:
 - Keep contrast/readability acceptable.
 - Add a documented visual-validation checklist and sanitized screenshot.
 
-### ASTRO-033 — Keep history current and add pagination
+### [ASTRO-033 — Keep history current and add pagination](https://github.com/joetheproz5/astrodesk/issues/7)
 
 Labels: `enhancement`, `ui`, `testing`
 
@@ -103,7 +103,7 @@ Acceptance criteria:
 - Preserve filters and selection across refreshes where possible.
 - Add repository/view-model tests for large histories.
 
-### ASTRO-034 — Add application, view-model, and timer tests
+### [ASTRO-034 — Add application, view-model, and timer tests](https://github.com/joetheproz5/astrodesk/issues/8)
 
 Labels: `testing`, `ui`
 
@@ -115,7 +115,7 @@ Acceptance criteria:
 - Keep tests independent of a personal phone, network, and live WPF desktop where possible.
 - Add a small Windows UI/integration layer only for behavior that cannot be isolated.
 
-### ASTRO-035 — Add bounded scrcpy stdout diagnostics
+### [ASTRO-035 — Add bounded scrcpy stdout diagnostics](https://github.com/joetheproz5/astrodesk/issues/9)
 
 Labels: `enhancement`, `scrcpy`, `ui`, `documentation`, `testing`
 
@@ -131,7 +131,7 @@ Acceptance criteria:
 
 ## Capture and scrcpy follow-up
 
-### ASTRO-006 — Add a Windows Graphics Capture backend with Win32 fallback
+### [ASTRO-006 — Add a Windows Graphics Capture backend with Win32 fallback](https://github.com/joetheproz5/astrodesk/issues/10)
 
 Labels: `enhancement`, `capture`, `testing`
 
@@ -143,7 +143,7 @@ Acceptance criteria:
 - Compare black-frame behavior, FPS, CPU, memory, rotation, and sleep/wake.
 - Keep README honest about the active backend.
 
-### ASTRO-007 — Detect scrcpy version and optional capabilities
+### [ASTRO-007 — Detect scrcpy version and optional capabilities](https://github.com/joetheproz5/astrodesk/issues/11)
 
 Labels: `enhancement`, `scrcpy`, `testing`
 
@@ -155,7 +155,7 @@ Acceptance criteria:
 - Include version in scrubbed diagnostics.
 - Test supported, old, malformed, missing, and timeout outputs.
 
-### ASTRO-008 — Harden sleep/wake and display-topology recovery
+### [ASTRO-008 — Harden sleep/wake and display-topology recovery](https://github.com/joetheproz5/astrodesk/issues/12)
 
 Labels: `bug`, `capture`, `scrcpy`, `input`, `testing`
 
@@ -167,7 +167,7 @@ Acceptance criteria:
 - Reconnect without ending the shooting session.
 - Add testable state-machine coverage plus hardware results.
 
-### ASTRO-009 — Establish capture/input compatibility matrix
+### [ASTRO-009 — Establish capture/input compatibility matrix](https://github.com/joetheproz5/astrodesk/issues/13)
 
 Labels: `testing`, `scrcpy`, `capture`, `input`, `documentation`
 
@@ -178,7 +178,7 @@ Acceptance criteria:
 - Publish only scrubbed compatibility statements.
 - Define the minimum supported scrcpy version from evidence.
 
-### ASTRO-010 — Add performance and unmanaged-resource soak tests
+### [ASTRO-010 — Add performance and unmanaged-resource soak tests](https://github.com/joetheproz5/astrodesk/issues/14)
 
 Labels: `testing`, `capture`
 
@@ -191,7 +191,7 @@ Acceptance criteria:
 
 ## Device and workflow follow-up
 
-### ASTRO-011 — Add guarded calibration for experimental ADB shutter taps
+### [ASTRO-011 — Add guarded calibration for experimental ADB shutter taps](https://github.com/joetheproz5/astrodesk/issues/15)
 
 Labels: `enhancement`, `adb`, `input`, `ui`, `testing`
 
@@ -203,7 +203,7 @@ Acceptance criteria:
 - Invalidate calibration after resolution/orientation/app-layout changes.
 - Provide an immediate stop control and never imply guaranteed capture.
 
-### ASTRO-012 — Add wireless ADB pairing and persistent preferred-device support
+### [ASTRO-012 — Add wireless ADB pairing and persistent preferred-device support](https://github.com/joetheproz5/astrodesk/issues/16)
 
 Labels: `enhancement`, `adb`, `ui`, `testing`
 
@@ -215,7 +215,7 @@ Acceptance criteria:
 - Distinguish USB/wireless state and recovery guidance.
 - Test multiple devices and endpoint validation.
 
-### ASTRO-013 — Implement opt-in Windows current-location provider
+### [ASTRO-013 — Implement opt-in Windows current-location provider](https://github.com/joetheproz5/astrodesk/issues/17)
 
 Labels: `enhancement`, `weather`, `ui`, `testing`
 
@@ -227,7 +227,7 @@ Acceptance criteria:
 - Do not run a hidden location background tracker.
 - Document provider/privacy behavior.
 
-### ASTRO-014 — Research reliable Samsung Camera capture-event signals
+### [ASTRO-014 — Research reliable Samsung Camera capture-event signals](https://github.com/joetheproz5/astrodesk/issues/18)
 
 Labels: `enhancement`, `adb`, `testing`
 
@@ -241,7 +241,7 @@ Acceptance criteria:
 
 ## Packaging and documentation
 
-### ASTRO-015 — Create a reproducible signed Windows installer
+### [ASTRO-015 — Create a reproducible signed Windows installer](https://github.com/joetheproz5/astrodesk/issues/19)
 
 Labels: `enhancement`, `documentation`, `testing`
 
@@ -253,7 +253,7 @@ Acceptance criteria:
 - Obtain signing material only through protected release infrastructure.
 - Test clean install, upgrade, uninstall, and offline start on Windows 11 x64.
 
-### ASTRO-016 — Replace README placeholders with validated screenshots
+### [ASTRO-016 — Replace README placeholders with validated screenshots](https://github.com/joetheproz5/astrodesk/issues/20)
 
 Labels: `documentation`, `ui`, `testing`
 
@@ -266,7 +266,7 @@ Acceptance criteria:
 
 ## UI/settings completeness
 
-### ASTRO-019 — Add named overlay presets and remaining geometry controls
+### [ASTRO-019 — Add named overlay presets and remaining geometry controls](https://github.com/joetheproz5/astrodesk/issues/21)
 
 Labels: `enhancement`, `capture`, `ui`, `testing`
 
@@ -280,7 +280,7 @@ Acceptance criteria:
 - Keep hide-all immediate and add reset/default behavior.
 - Add geometry, serialization, and UI-state tests.
 
-### ASTRO-020 — Validate histogram cadence performance
+### [ASTRO-020 — Validate histogram cadence performance](https://github.com/joetheproz5/astrodesk/issues/22)
 
 Labels: `enhancement`, `capture`, `ui`, `testing`
 
@@ -293,7 +293,7 @@ Acceptance criteria:
 - Clamp unsafe values and degrade gracefully when the machine cannot keep up.
 - Add automated throttling tests plus the hardware results.
 
-### ASTRO-021 — Add saved observing-location management
+### [ASTRO-021 — Add saved observing-location management](https://github.com/joetheproz5/astrodesk/issues/23)
 
 Labels: `enhancement`, `weather`, `ui`, `testing`
 
@@ -308,7 +308,7 @@ Acceptance criteria:
 - Keep Lebanon seeds optional and non-restrictive.
 - Add repository and view-model tests.
 
-### ASTRO-022 — Add user-configurable keyboard shortcuts
+### [ASTRO-022 — Add user-configurable keyboard shortcuts](https://github.com/joetheproz5/astrodesk/issues/24)
 
 Labels: `enhancement`, `input`, `ui`, `testing`, `documentation`
 
@@ -322,13 +322,9 @@ Acceptance criteria:
 - Keep a documented reset-to-default option.
 - Add translation/conflict tests and update README.
 
-## Suggested creation order
+## Publication status
 
-1. Create all requested labels.
-2. Create ASTRO-001 and ASTRO-005 as first-release blockers.
-3. Create ASTRO-025, ASTRO-031, and ASTRO-032 for application reliability before a field release.
-4. Create ASTRO-006 through ASTRO-010 for capture/input resilience.
-5. Create ASTRO-011 through ASTRO-014 for device/workflow follow-up.
-6. Create ASTRO-015 and ASTRO-016 for packaging and documentation.
-7. Create ASTRO-019 through ASTRO-022 plus ASTRO-033 through ASTRO-035 for UI/settings/test completeness.
-8. Replace each seed ID in documentation or source TODOs with the real GitHub issue link as issues are created.
+- Repository: [`joetheproz5/astrodesk`](https://github.com/joetheproz5/astrodesk)
+- Labels: published
+- Roadmap issues: 23 published and linked above
+- Automated dependency updates: enabled through Dependabot
