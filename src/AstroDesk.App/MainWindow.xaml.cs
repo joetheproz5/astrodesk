@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -101,13 +102,13 @@ public partial class MainWindow : Window
                 ToColorRef(232, 0, 0),
                 ToColorRef(62, 0, 0)),
             NightDisplayMode.Dim => (
-                ToColorRef(4, 5, 6),
-                ToColorRef(181, 186, 191),
-                ToColorRef(28, 32, 36)),
+                ToColorRef(3, 5, 9),
+                ToColorRef(184, 190, 201),
+                ToColorRef(27, 36, 52)),
             _ => (
-                ToColorRef(0, 0, 0),
-                ToColorRef(232, 237, 242),
-                ToColorRef(40, 49, 61)),
+                ToColorRef(7, 10, 17),
+                ToColorRef(243, 246, 251),
+                ToColorRef(38, 51, 75)),
         };
         _ = DwmSetWindowAttribute(
             handle,
@@ -304,6 +305,17 @@ public partial class MainWindow : Window
         _viewModel.HistoryFromDate = null;
         _viewModel.HistoryToDate = null;
         _viewModel.HistoryMinimumRating = 0;
+    }
+
+    private void OpenButtonContextMenu_OnClick(object sender, RoutedEventArgs args)
+    {
+        if (sender is not Button button || button.ContextMenu is null)
+        {
+            return;
+        }
+
+        button.ContextMenu.PlacementTarget = button;
+        button.ContextMenu.IsOpen = true;
     }
 
     private void Window_OnPreviewKeyDown(object sender, KeyEventArgs args)

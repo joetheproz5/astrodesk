@@ -8,8 +8,8 @@
         Title="AstroDesk"
         Width="1400"
         Height="900"
-        MinWidth="820"
-        MinHeight="650"
+        MinWidth="1050"
+        MinHeight="700"
         WindowState="Maximized"
         WindowStartupLocation="CenterScreen"
         PreviewKeyDown="Window_OnPreviewKeyDown">
@@ -19,18 +19,18 @@
         <controls:BooleanNegationConverter x:Key="BooleanNegation" />
     </Window.Resources>
 
-    <Grid Background="{DynamicResource WindowBackgroundBrush}">
+    <Grid Background="{DynamicResource WorkspaceBackgroundBrush}">
         <Grid.RowDefinitions>
-            <RowDefinition Height="58" />
+            <RowDefinition Height="72" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="34" />
+            <RowDefinition Height="36" />
         </Grid.RowDefinitions>
 
         <Border Grid.Row="0"
-                Background="{DynamicResource PanelBackgroundBrush}"
+                Background="{DynamicResource WindowBackgroundBrush}"
                 BorderBrush="{DynamicResource PanelBorderBrush}"
                 BorderThickness="0,0,0,1">
-            <Grid Margin="16,0">
+            <Grid Margin="24,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="22" />
@@ -42,24 +42,24 @@
                 <StackPanel Grid.Column="0"
                             VerticalAlignment="Center"
                             Orientation="Horizontal">
-                    <Border Width="31"
-                            Height="31"
-                            CornerRadius="8"
+                    <Border Width="38"
+                            Height="38"
+                            CornerRadius="12"
                             Background="{DynamicResource AccentBrush}"
-                            Margin="0,0,10,0">
+                            Margin="0,0,12,0">
                         <TextBlock Text="✦"
-                                   FontSize="18"
+                                   FontSize="20"
                                    HorizontalAlignment="Center"
                                    VerticalAlignment="Center"
                                    Foreground="{DynamicResource WindowBackgroundBrush}" />
                     </Border>
                     <StackPanel>
                         <TextBlock Text="AstroDesk"
-                                   FontSize="18"
+                                   FontSize="20"
                                    FontWeight="SemiBold" />
-                        <TextBlock Text="S23 Ultra shooting companion"
+                        <TextBlock Text="Night shooting workspace"
                                    Style="{StaticResource MutedText}"
-                                   FontSize="10" />
+                                   FontSize="11" />
                     </StackPanel>
                 </StackPanel>
 
@@ -68,25 +68,51 @@
                             VerticalAlignment="Center">
                     <Button Content="Shoot"
                             Command="{Binding ShowDashboardCommand}"
-                            Style="{StaticResource ToolbarButton}"
-                            Margin="0,0,6,0" />
+                            Margin="0,0,4,0">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsDashboard}" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource PanelRaisedBrush}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource PanelBorderBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
                     <Button Content="History"
                             Command="{Binding ShowHistoryCommand}"
-                            Style="{StaticResource ToolbarButton}"
-                            Margin="0,0,6,0" />
+                            Margin="0,0,4,0">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsHistory}" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource PanelRaisedBrush}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource PanelBorderBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
                     <Button Content="Settings"
-                            Command="{Binding ShowSettingsCommand}"
-                            Style="{StaticResource ToolbarButton}" />
+                            Command="{Binding ShowSettingsCommand}">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource NavButton}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsSettings}" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource PanelRaisedBrush}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource PanelBorderBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
                 </StackPanel>
 
                 <StackPanel Grid.Column="4"
                             Orientation="Horizontal"
                             VerticalAlignment="Center">
-                    <Border Background="{DynamicResource PanelRaisedBrush}"
-                            BorderBrush="{DynamicResource PanelBorderBrush}"
-                            BorderThickness="1"
-                            CornerRadius="6"
-                            Padding="8,5"
+                    <Border Style="{StaticResource StatusPill}"
                             Margin="0,0,8,0">
                         <StackPanel Orientation="Horizontal">
                             <Ellipse Width="7"
@@ -111,24 +137,16 @@
                                        VerticalAlignment="Center" />
                         </StackPanel>
                     </Border>
-                    <Border Background="{DynamicResource PanelRaisedBrush}"
-                            BorderBrush="{DynamicResource PanelBorderBrush}"
-                            BorderThickness="1"
-                            CornerRadius="6"
-                            Padding="8,5"
+                    <Border Style="{StaticResource StatusPill}"
                             Margin="0,0,8,0">
-                        <TextBlock Text="{Binding BatteryText}"
-                                   MaxWidth="100"
+                        <TextBlock Text="{Binding BatteryText, StringFormat=Battery · {0}}"
+                                   MaxWidth="150"
                                    ToolTip="{Binding BatteryText}"
                                    TextTrimming="CharacterEllipsis" />
                     </Border>
-                    <Border Background="{DynamicResource PanelRaisedBrush}"
-                            BorderBrush="{DynamicResource PanelBorderBrush}"
-                            BorderThickness="1"
-                            CornerRadius="6"
-                            Padding="8,5">
-                        <TextBlock Text="{Binding PhoneTemperatureText}"
-                                   MaxWidth="105"
+                    <Border Style="{StaticResource StatusPill}">
+                        <TextBlock Text="{Binding PhoneTemperatureText, StringFormat=Phone · {0}}"
+                                   MaxWidth="145"
                                    ToolTip="{Binding PhoneTemperatureText}"
                                    TextTrimming="CharacterEllipsis" />
                     </Border>
@@ -139,18 +157,296 @@
         <Grid Grid.Row="1">
             <Grid Visibility="{Binding IsDashboard, Converter={StaticResource BoolToVisibility}}">
                 <Grid Visibility="{Binding IsPreviewFullscreen, Converter={StaticResource InverseBoolToVisibility}}"
-                      Margin="8">
+                      Margin="18">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="235" />
-                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="330" />
+                        <ColumnDefinition Width="14" />
                         <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="8" />
-                        <ColumnDefinition Width="270" />
+                        <ColumnDefinition Width="14" />
+                        <ColumnDefinition Width="360" />
                     </Grid.ColumnDefinitions>
 
                     <Border Grid.Column="0" Style="{StaticResource PanelCard}" Padding="0">
+                        <Grid>
+                            <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                                          VerticalScrollBarVisibility="Auto"
+                                          PanningMode="VerticalFirst"
+                                          PanningDeceleration="0.001"
+                                          PanningRatio="1">
+                                <StackPanel Margin="20">
+                                    <DockPanel Margin="0,0,0,18">
+                                        <StackPanel>
+                                            <TextBlock Text="Night brief" Style="{StaticResource PageTitle}" FontSize="23" />
+                                            <TextBlock Text="{Binding ConditionsUpdatedText}"
+                                                       Style="{StaticResource PageSubtitle}" />
+                                        </StackPanel>
+                                        <Button DockPanel.Dock="Right"
+                                                Content="↻"
+                                                Command="{Binding RefreshConditionsCommand}"
+                                                Style="{StaticResource CompactButton}"
+                                                FontSize="17"
+                                                MinWidth="36"
+                                                ToolTip="Refresh conditions" />
+                                    </DockPanel>
+
+                                    <Border Style="{StaticResource SubtleCard}" Margin="0,0,0,14">
+                                        <StackPanel>
+                                            <DockPanel>
+                                                <StackPanel>
+                                                    <TextBlock Text="OBSERVING LOCATION"
+                                                               Style="{StaticResource SectionTitle}" />
+                                                    <TextBlock Text="{Binding LocationStatusText}"
+                                                               FontWeight="SemiBold"
+                                                               FontSize="15" />
+                                                </StackPanel>
+                                                <Border DockPanel.Dock="Right"
+                                                        Width="9"
+                                                        Height="9"
+                                                        CornerRadius="5"
+                                                        Background="{DynamicResource SuccessBrush}"
+                                                        VerticalAlignment="Top"
+                                                        Margin="8,5,0,0" />
+                                            </DockPanel>
+                                            <TextBlock Text="{Binding LocationCoordinateText}"
+                                                       Style="{StaticResource MutedText}"
+                                                       Margin="0,5,0,0" />
+                                            <TextBlock Text="{Binding TimeZoneText, StringFormat=Time zone · {0}}"
+                                                       Style="{StaticResource MutedText}"
+                                                       Margin="0,3,0,0" />
+                                            <TextBlock Text="{Binding AltitudeText, StringFormat=Altitude · {0}}"
+                                                       Style="{StaticResource MutedText}"
+                                                       Margin="0,3,0,0" />
+                                            <UniformGrid Columns="2" Margin="0,12,0,0">
+                                                <Button Content="Locate me"
+                                                        Command="{Binding LocateCurrentUserCommand}"
+                                                        Style="{StaticResource AccentButton}"
+                                                        Margin="0,0,5,0" />
+                                                <Button Content="Windows settings"
+                                                        Command="{Binding OpenLocationSettingsCommand}"
+                                                        Style="{StaticResource ToolbarButton}"
+                                                        Margin="5,0,0,0" />
+                                            </UniformGrid>
+                                            <Expander Header="Change observing location"
+                                                      Margin="0,12,0,0">
+                                                <StackPanel>
+                                                    <ComboBox ItemsSource="{Binding Locations}"
+                                                              SelectedItem="{Binding SelectedLocation}"
+                                                              DisplayMemberPath="Name"
+                                                              ToolTip="Select a saved or fallback observing area." />
+                                                    <Grid Margin="0,9,0,0">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="8" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBox Text="{Binding LocationSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                                                 ToolTip="Search worldwide locations" />
+                                                        <Button Grid.Column="2"
+                                                                Content="Search"
+                                                                Command="{Binding SearchLocationsCommand}"
+                                                                Style="{StaticResource ToolbarButton}" />
+                                                    </Grid>
+                                                    <TextBlock Text="Manual coordinates"
+                                                               Style="{StaticResource FieldLabel}" />
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="8" />
+                                                            <ColumnDefinition Width="*" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBox Text="{Binding Latitude}" ToolTip="Latitude" />
+                                                        <TextBox Grid.Column="2" Text="{Binding Longitude}" ToolTip="Longitude" />
+                                                    </Grid>
+                                                </StackPanel>
+                                            </Expander>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource HeroCard}" Margin="0,0,0,18">
+                                        <StackPanel>
+                                            <DockPanel>
+                                                <TextBlock Text="TONIGHT"
+                                                           Style="{StaticResource SectionTitle}"
+                                                           Foreground="{DynamicResource PrimaryTextBrush}"
+                                                           Margin="0" />
+                                                <TextBlock DockPanel.Dock="Right"
+                                                           Text="{Binding ShootingScoreText}"
+                                                           FontSize="21"
+                                                           FontWeight="SemiBold"
+                                                           Margin="12,0,0,0" />
+                                            </DockPanel>
+                                            <TextBlock Text="{Binding ShootingRecommendationText}"
+                                                       FontSize="21"
+                                                       FontWeight="SemiBold"
+                                                       Margin="0,12,0,0"
+                                                       TextWrapping="Wrap">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding ShootQualityLevel}" Value="Excellent">
+                                                                    <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding ShootQualityLevel}" Value="Fair">
+                                                                    <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding ShootQualityLevel}" Value="Poor">
+                                                                    <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                            </TextBlock>
+                                            <Border Background="{DynamicResource WindowBackgroundBrush}"
+                                                    CornerRadius="9"
+                                                    Padding="11,8"
+                                                    Margin="0,13,0,0">
+                                                <DockPanel LastChildFill="False">
+                                                    <TextBlock DockPanel.Dock="Left"
+                                                               Text="Best window"
+                                                               Style="{StaticResource MutedText}" />
+                                                    <TextBlock DockPanel.Dock="Right"
+                                                               Text="{Binding BestShootingWindowText}"
+                                                               FontWeight="SemiBold" />
+                                                </DockPanel>
+                                            </Border>
+                                            <TextBlock Text="{Binding ShootingAdviceText}"
+                                                       Style="{StaticResource MutedText}"
+                                                       Margin="0,10,0,0" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <TextBlock Text="WEATHER NOW" Style="{StaticResource SectionTitle}" />
+                                    <UniformGrid Columns="2" Margin="0,0,-8,8">
+                                        <Border Style="{StaticResource MetricTile}">
+                                            <StackPanel>
+                                                <TextBlock Text="Temperature" Style="{StaticResource MutedText}" />
+                                                <TextBlock Text="{Binding TemperatureText}" Style="{StaticResource MetricValue}" Margin="0,5,0,0" />
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Style="{StaticResource MetricTile}">
+                                            <StackPanel>
+                                                <TextBlock Text="Cloud cover" Style="{StaticResource MutedText}" />
+                                                <TextBlock Text="{Binding CloudCoverText}" Style="{StaticResource MetricValue}" Margin="0,5,0,0" />
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Style="{StaticResource MetricTile}">
+                                            <StackPanel>
+                                                <TextBlock Text="Visibility" Style="{StaticResource MutedText}" />
+                                                <TextBlock Text="{Binding VisibilityText}" Style="{StaticResource MetricValue}" Margin="0,5,0,0" />
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Style="{StaticResource MetricTile}">
+                                            <StackPanel>
+                                                <TextBlock Text="Rain chance" Style="{StaticResource MutedText}" />
+                                                <TextBlock Text="{Binding PrecipitationText}" Style="{StaticResource MetricValue}" Margin="0,5,0,0" />
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Style="{StaticResource MetricTile}">
+                                            <StackPanel>
+                                                <TextBlock Text="Humidity" Style="{StaticResource MutedText}" />
+                                                <TextBlock Text="{Binding HumidityText}" Style="{StaticResource MetricValue}" Margin="0,5,0,0" />
+                                            </StackPanel>
+                                        </Border>
+                                        <Border Style="{StaticResource MetricTile}">
+                                            <StackPanel>
+                                                <TextBlock Text="Wind" Style="{StaticResource MutedText}" />
+                                                <TextBlock Text="{Binding WindText}" Style="{StaticResource MetricValue}" Margin="0,5,0,0" />
+                                            </StackPanel>
+                                        </Border>
+                                    </UniformGrid>
+                                    <Border Style="{StaticResource SubtleCard}" Margin="0,0,0,18">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel>
+                                                <TextBlock Text="Dew point" Style="{StaticResource MutedText}" />
+                                                <TextBlock Text="{Binding DewPointText}" FontWeight="SemiBold" Margin="0,3,0,0" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" HorizontalAlignment="Right">
+                                                <TextBlock Text="Dew risk" Style="{StaticResource MutedText}" HorizontalAlignment="Right" />
+                                                <TextBlock Text="{Binding DewRiskText}" FontWeight="SemiBold" Margin="0,3,0,0" HorizontalAlignment="Right" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+
+                                    <TextBlock Text="SKY &amp; DARKNESS" Style="{StaticResource SectionTitle}" />
+                                    <Border Style="{StaticResource SubtleCard}" Margin="0,0,0,14">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding LightPollutionText}"
+                                                       Style="{StaticResource MetricValue}" />
+                                            <TextBlock Text="{Binding LightPollutionDetailText}"
+                                                       Style="{StaticResource MutedText}"
+                                                       Margin="0,5,0,0" />
+                                            <Border Style="{StaticResource SeparatorLine}" />
+                                            <DockPanel>
+                                                <TextBlock Text="Dark-sky window" Style="{StaticResource MutedText}" />
+                                                <TextBlock DockPanel.Dock="Right"
+                                                           Text="{Binding DarkSkyWindowText}"
+                                                           FontWeight="SemiBold" />
+                                            </DockPanel>
+                                            <Grid Margin="0,12,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                    <RowDefinition Height="Auto" />
+                                                </Grid.RowDefinitions>
+                                                <TextBlock Text="Sunset" Style="{StaticResource MutedText}" />
+                                                <TextBlock Grid.Column="1" Text="{Binding SunsetText}" />
+                                                <TextBlock Grid.Row="1" Text="Astronomical dusk" Style="{StaticResource MutedText}" Margin="0,7,0,0" />
+                                                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding AstronomicalDuskText}" Margin="0,7,0,0" />
+                                                <TextBlock Grid.Row="2" Text="Astronomical dawn" Style="{StaticResource MutedText}" Margin="0,7,0,0" />
+                                                <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding AstronomicalDawnText}" Margin="0,7,0,0" />
+                                                <TextBlock Grid.Row="3" Text="Sunrise" Style="{StaticResource MutedText}" Margin="0,7,0,0" />
+                                                <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SunriseText}" Margin="0,7,0,0" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Style="{StaticResource SubtleCard}">
+                                        <StackPanel>
+                                            <DockPanel>
+                                                <StackPanel>
+                                                    <TextBlock Text="MOON" Style="{StaticResource SectionTitle}" />
+                                                    <TextBlock Text="{Binding MoonPhaseText}" Style="{StaticResource MetricValue}" />
+                                                </StackPanel>
+                                                <TextBlock DockPanel.Dock="Right"
+                                                           Text="{Binding MoonIlluminationText, StringFormat={}{0} lit}"
+                                                           Style="{StaticResource MutedText}"
+                                                           Margin="10,3,0,0" />
+                                            </DockPanel>
+                                            <TextBlock Text="{Binding MoonPositionText}"
+                                                       Margin="0,10,0,0"
+                                                       FontWeight="SemiBold" />
+                                            <Grid Margin="0,10,0,0">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="Moonrise" Style="{StaticResource MutedText}" />
+                                                    <TextBlock Text="{Binding MoonriseText}" Margin="0,3,0,0" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="1" HorizontalAlignment="Right">
+                                                    <TextBlock Text="Moonset" Style="{StaticResource MutedText}" HorizontalAlignment="Right" />
+                                                    <TextBlock Text="{Binding MoonsetText}" Margin="0,3,0,0" HorizontalAlignment="Right" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </ScrollViewer>
+
                         <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                                       VerticalScrollBarVisibility="Auto"
+                                      Visibility="Collapsed"
                                       PanningMode="VerticalFirst"
                                       PanningDeceleration="0.001"
                                       PanningRatio="1">
@@ -422,20 +718,98 @@
                                            Margin="0,12,0,0" />
                             </StackPanel>
                         </ScrollViewer>
+                        </Grid>
                     </Border>
 
                     <Grid Grid.Column="2">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
-                            <RowDefinition Height="8" />
+                            <RowDefinition Height="12" />
                             <RowDefinition Height="*" />
-                            <RowDefinition Height="8" />
+                            <RowDefinition Height="12" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <Border Style="{StaticResource PanelCard}" Padding="8">
+                        <Border Style="{StaticResource PanelCard}" Padding="10">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="PHONE PREVIEW"
+                                               Style="{StaticResource SectionTitle}"
+                                               Margin="0,0,0,3" />
+                                    <TextBlock Text="{Binding PreviewStatus}"
+                                               Style="{StaticResource MutedText}"
+                                               MaxWidth="155"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding PreviewStatus}" />
+                                </StackPanel>
+                                <ScrollViewer Grid.Column="2"
+                                              HorizontalScrollBarVisibility="Hidden"
+                                              VerticalScrollBarVisibility="Disabled"
+                                              PanningMode="HorizontalFirst"
+                                              PanningDeceleration="0.001"
+                                              PanningRatio="1">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Content="Start preview"
+                                                Command="{Binding StartPreviewCommand}"
+                                                Style="{StaticResource AccentButton}"
+                                                Margin="0,0,6,0" />
+                                        <Button Content="Reconnect"
+                                                Command="{Binding ReconnectPreviewCommand}"
+                                                Style="{StaticResource ToolbarButton}"
+                                                Margin="0,0,6,0" />
+                                        <Button Content="← Back"
+                                                Command="{Binding BackCommand}"
+                                                Style="{StaticResource ToolbarButton}"
+                                                Margin="0,0,6,0" />
+                                        <Button Content="⌂ Home"
+                                                Command="{Binding HomeCommand}"
+                                                Style="{StaticResource ToolbarButton}"
+                                                Margin="0,0,6,0" />
+                                        <Button Content="Rotate"
+                                                Command="{Binding RotatePhoneCommand}"
+                                                Style="{StaticResource ToolbarButton}"
+                                                Margin="0,0,6,0" />
+                                        <Button Content="Screenshot"
+                                                Command="{Binding TakeScreenshotCommand}"
+                                                Style="{StaticResource ToolbarButton}"
+                                                Margin="0,0,6,0" />
+                                        <Button Content="Fullscreen"
+                                                Command="{Binding TogglePreviewFullscreenCommand}"
+                                                Style="{StaticResource ToolbarButton}"
+                                                Margin="0,0,6,0" />
+                                        <Button Content="More ···"
+                                                Style="{StaticResource ToolbarButton}"
+                                                Click="OpenButtonContextMenu_OnClick">
+                                            <Button.ContextMenu>
+                                                <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                    <MenuItem Header="Stop preview" Command="{Binding StopPreviewCommand}" />
+                                                    <Separator />
+                                                    <MenuItem Header="Recent apps" Command="{Binding RecentAppsCommand}" />
+                                                    <MenuItem Header="Volume down" Command="{Binding VolumeDownCommand}" />
+                                                    <MenuItem Header="Volume up" Command="{Binding VolumeUpCommand}" />
+                                                    <MenuItem Header="Power button" Command="{Binding PowerCommand}" />
+                                                    <Separator />
+                                                    <MenuItem Header="Copy preview" Command="{Binding CopyPreviewToClipboardCommand}" />
+                                                    <MenuItem Header="Open screenshots folder" Command="{Binding OpenScreenshotFolderCommand}" />
+                                                    <MenuItem Header="Paste clipboard to phone" Command="{Binding PasteClipboardCommand}" />
+                                                    <MenuItem Header="Keep phone awake" Command="{Binding KeepPhoneAwakeCommand}" />
+                                                    <MenuItem Header="Turn phone screen off"
+                                                              Command="{Binding TurnPhoneScreenOffCommand}"
+                                                              IsEnabled="False" />
+                                                </ContextMenu>
+                                            </Button.ContextMenu>
+                                        </Button>
+                                    </StackPanel>
+                                </ScrollViewer>
+
                             <ScrollViewer HorizontalScrollBarVisibility="Auto"
                                           VerticalScrollBarVisibility="Disabled"
+                                          Visibility="Collapsed"
                                           PanningMode="HorizontalFirst"
                                           PanningDeceleration="0.001"
                                           PanningRatio="1">
@@ -467,13 +841,14 @@
                                     <Button Content="Keep awake" Command="{Binding KeepPhoneAwakeCommand}" Style="{StaticResource ToolbarButton}" />
                                 </StackPanel>
                             </ScrollViewer>
+                            </Grid>
                         </Border>
 
                         <Border Grid.Row="2"
                                 Background="{DynamicResource PreviewBackgroundBrush}"
                                 BorderBrush="{DynamicResource PanelBorderBrush}"
                                 BorderThickness="1"
-                                CornerRadius="9"
+                                CornerRadius="16"
                                 ClipToBounds="True">
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -578,9 +953,97 @@
                             </Grid>
                         </Border>
 
-                        <Border Grid.Row="4" Style="{StaticResource PanelCard}" Padding="8">
+                        <Border Grid.Row="4" Style="{StaticResource PanelCard}" Padding="10">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="FRAMING"
+                                               Style="{StaticResource SectionTitle}"
+                                               Margin="0,0,0,3" />
+                                    <TextBlock Text="{Binding PreviewZoom, StringFormat={}{0:0.#}× zoom}"
+                                               Style="{StaticResource MutedText}" />
+                                </StackPanel>
+                                <ScrollViewer Grid.Column="2"
+                                              HorizontalScrollBarVisibility="Hidden"
+                                              VerticalScrollBarVisibility="Disabled"
+                                              PanningMode="HorizontalFirst"
+                                              PanningDeceleration="0.001"
+                                              PanningRatio="1">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ToggleButton Content="Grid"
+                                                      IsChecked="{Binding RuleOfThirds}"
+                                                      Margin="0,0,6,0" />
+                                        <ToggleButton Content="Crosshair"
+                                                      IsChecked="{Binding Crosshair}"
+                                                      Margin="0,0,6,0" />
+                                        <ToggleButton Content="Horizon"
+                                                      IsChecked="{Binding HorizonLine}"
+                                                      Margin="0,0,6,0" />
+                                        <ToggleButton Content="Focus"
+                                                      IsChecked="{Binding FocusMagnifier}"
+                                                      Margin="0,0,6,0" />
+                                        <ToggleButton Content="Histogram"
+                                                      IsChecked="{Binding ShowHistogram}"
+                                                      Margin="0,0,6,0" />
+                                        <Button Content="Freeze"
+                                                Command="{Binding ToggleFreezeCommand}"
+                                                Style="{StaticResource ToolbarButton}"
+                                                Margin="0,0,10,0" />
+                                        <Button Content="1×"
+                                                Command="{Binding Zoom1Command}"
+                                                Style="{StaticResource CompactButton}"
+                                                Margin="0,0,4,0" />
+                                        <Button Content="2×"
+                                                Command="{Binding Zoom2Command}"
+                                                Style="{StaticResource CompactButton}"
+                                                Margin="0,0,4,0" />
+                                        <Button Content="4×"
+                                                Command="{Binding Zoom4Command}"
+                                                Style="{StaticResource CompactButton}"
+                                                Margin="0,0,6,0" />
+                                        <Button Content="More ···"
+                                                Style="{StaticResource ToolbarButton}"
+                                                Click="OpenButtonContextMenu_OnClick">
+                                            <Button.ContextMenu>
+                                                <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                    <MenuItem Header="Diagonal guides"
+                                                              IsCheckable="True"
+                                                              IsChecked="{Binding DiagonalGuides, Mode=TwoWay}" />
+                                                    <MenuItem Header="Safe area"
+                                                              IsCheckable="True"
+                                                              IsChecked="{Binding SafeArea, Mode=TwoWay}" />
+                                                    <MenuItem Header="Custom rectangle"
+                                                              IsCheckable="True"
+                                                              IsChecked="{Binding CustomRectangle, Mode=TwoWay}" />
+                                                    <MenuItem Header="Circle overlay"
+                                                              IsCheckable="True"
+                                                              IsChecked="{Binding CircleOverlay, Mode=TwoWay}" />
+                                                    <Separator />
+                                                    <MenuItem Header="8× zoom" Command="{Binding Zoom8Command}" />
+                                                    <MenuItem Header="Pixel perfect"
+                                                              IsCheckable="True"
+                                                              IsChecked="{Binding PixelPerfect, Mode=TwoWay}" />
+                                                    <MenuItem Header="Histogram over preview"
+                                                              IsCheckable="True"
+                                                              IsChecked="{Binding HistogramOverlay, Mode=TwoWay}" />
+                                                    <MenuItem Header="Hide every overlay"
+                                                              Command="{Binding HideAllOverlaysCommand}" />
+                                                    <Separator />
+                                                    <MenuItem Header="Cycle night mode"
+                                                              Command="{Binding CycleNightModeCommand}" />
+                                                </ContextMenu>
+                                            </Button.ContextMenu>
+                                        </Button>
+                                    </StackPanel>
+                                </ScrollViewer>
+
                             <ScrollViewer HorizontalScrollBarVisibility="Auto"
                                           VerticalScrollBarVisibility="Disabled"
+                                          Visibility="Collapsed"
                                           PanningMode="HorizontalFirst"
                                           PanningDeceleration="0.001"
                                           PanningRatio="1">
@@ -605,12 +1068,284 @@
                                     <Button Content="Night mode" Command="{Binding CycleNightModeCommand}" Style="{StaticResource ToolbarButton}" />
                                 </StackPanel>
                             </ScrollViewer>
+                            </Grid>
                         </Border>
                     </Grid>
 
                     <Border Grid.Column="4" Style="{StaticResource PanelCard}" Padding="0">
+                        <Grid>
+                            <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                                          VerticalScrollBarVisibility="Auto"
+                                          PanningMode="VerticalFirst"
+                                          PanningDeceleration="0.001"
+                                          PanningRatio="1">
+                                <StackPanel Margin="20">
+                                    <DockPanel Margin="0,0,0,18">
+                                        <StackPanel>
+                                            <TextBlock Text="Session" Style="{StaticResource PageTitle}" FontSize="23" />
+                                            <TextBlock Text="Plan, shoot, and stay on pace"
+                                                       Style="{StaticResource PageSubtitle}" />
+                                        </StackPanel>
+                                        <Border DockPanel.Dock="Right"
+                                                Style="{StaticResource StatusPill}"
+                                                Padding="10,6"
+                                                Margin="10,0,0,0"
+                                                VerticalAlignment="Top">
+                                            <TextBlock Text="{Binding SessionStateText}"
+                                                       FontSize="11.5"
+                                                       MaxWidth="125"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       ToolTip="{Binding SessionStateText}" />
+                                        </Border>
+                                    </DockPanel>
+
+                                    <TabControl>
+                                        <TabItem Header="Plan">
+                                            <StackPanel>
+                                                <TextBlock Text="Target" Style="{StaticResource FieldLabel}" Margin="0,0,0,5" />
+                                                <TextBox Text="{Binding TargetName, UpdateSourceTrigger=PropertyChanged}" />
+                                                <TextBlock Text="Session type" Style="{StaticResource FieldLabel}" />
+                                                <ComboBox ItemsSource="{Binding SessionTypes}"
+                                                          SelectedItem="{Binding SelectedSessionType}" />
+
+                                                <Grid Margin="0,2,0,0">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="10" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel>
+                                                        <TextBlock Text="ISO" Style="{StaticResource FieldLabel}" />
+                                                        <TextBox Text="{Binding Iso}" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="2">
+                                                        <TextBlock Text="Exposure · seconds" Style="{StaticResource FieldLabel}" />
+                                                        <TextBox Text="{Binding ExposureSeconds}" />
+                                                    </StackPanel>
+                                                </Grid>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="10" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel>
+                                                        <TextBlock Text="Planned frames" Style="{StaticResource FieldLabel}" />
+                                                        <TextBox Text="{Binding PlannedFrameCount}" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="2">
+                                                        <TextBlock Text="Gap · seconds" Style="{StaticResource FieldLabel}" />
+                                                        <TextBox Text="{Binding DelayBetweenFramesSeconds}" />
+                                                    </StackPanel>
+                                                </Grid>
+                                                <TextBlock Text="Phone lens" Style="{StaticResource FieldLabel}" />
+                                                <ComboBox ItemsSource="{Binding PhoneLensOptions}"
+                                                          SelectedItem="{Binding SelectedPhoneLens}" />
+
+                                                <Expander Header="More capture settings"
+                                                          Margin="0,14,0,0">
+                                                    <StackPanel>
+                                                        <TextBlock Text="Camera" Style="{StaticResource FieldLabel}" Margin="0,0,0,5" />
+                                                        <TextBox Text="{Binding CameraName}" />
+                                                        <Grid>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="10" />
+                                                                <ColumnDefinition Width="*" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <StackPanel>
+                                                                <TextBlock Text="White balance" Style="{StaticResource FieldLabel}" />
+                                                                <TextBox Text="{Binding WhiteBalance}" />
+                                                            </StackPanel>
+                                                            <StackPanel Grid.Column="2">
+                                                                <TextBlock Text="Focus" Style="{StaticResource FieldLabel}" />
+                                                                <TextBox Text="{Binding FocusSetting}" />
+                                                            </StackPanel>
+                                                        </Grid>
+                                                        <TextBlock Text="Initial delay · seconds" Style="{StaticResource FieldLabel}" />
+                                                        <TextBox Text="{Binding InitialDelaySeconds}" />
+                                                        <CheckBox Content="Capture RAW"
+                                                                  IsChecked="{Binding RawEnabled}"
+                                                                  Margin="0,12,0,0" />
+                                                    </StackPanel>
+                                                </Expander>
+
+                                                <Button Content="Start shooting session"
+                                                        Command="{Binding StartSessionCommand}"
+                                                        Style="{StaticResource AccentButton}"
+                                                        Margin="0,18,0,0" />
+                                                <UniformGrid Columns="3" Margin="0,8,0,0">
+                                                    <Button Content="Pause"
+                                                            Command="{Binding PauseSessionCommand}"
+                                                            Style="{StaticResource ToolbarButton}"
+                                                            Margin="0,0,4,0" />
+                                                    <Button Content="Resume"
+                                                            Command="{Binding ResumeSessionCommand}"
+                                                            Style="{StaticResource ToolbarButton}"
+                                                            Margin="4,0" />
+                                                    <Button Content="End"
+                                                            Command="{Binding EndSessionCommand}"
+                                                            Style="{StaticResource DangerButton}"
+                                                            Margin="4,0,0,0" />
+                                                </UniformGrid>
+                                            </StackPanel>
+                                        </TabItem>
+
+                                        <TabItem Header="Progress">
+                                            <StackPanel>
+                                                <Border Style="{StaticResource HeroCard}">
+                                                    <StackPanel>
+                                                        <DockPanel>
+                                                            <StackPanel>
+                                                                <TextBlock Text="FRAMES"
+                                                                           Style="{StaticResource SectionTitle}"
+                                                                           Foreground="{DynamicResource PrimaryTextBrush}" />
+                                                                <TextBlock Text="{Binding FrameCountText}"
+                                                                           FontSize="32"
+                                                                           FontWeight="SemiBold" />
+                                                                <TextBlock Text="{Binding SessionElapsedText, StringFormat=Elapsed · {0}}"
+                                                                           Style="{StaticResource MutedText}"
+                                                                           Margin="0,3,0,0" />
+                                                            </StackPanel>
+                                                            <StackPanel DockPanel.Dock="Right"
+                                                                        Orientation="Horizontal"
+                                                                        VerticalAlignment="Center">
+                                                                <Button Content="−1"
+                                                                        Command="{Binding RemoveFrameCommand}"
+                                                                        Style="{StaticResource ToolbarButton}"
+                                                                        Margin="0,0,6,0" />
+                                                                <Button Content="+1"
+                                                                        Command="{Binding AddFrameCommand}"
+                                                                        Style="{StaticResource AccentButton}"
+                                                                        MinWidth="58" />
+                                                            </StackPanel>
+                                                        </DockPanel>
+                                                        <ProgressBar Minimum="0"
+                                                                     Maximum="100"
+                                                                     Value="{Binding FrameProgress}"
+                                                                     Margin="0,15,0,7" />
+                                                        <DockPanel>
+                                                            <TextBlock Text="{Binding FrameProgressText}"
+                                                                       Style="{StaticResource MutedText}" />
+                                                            <TextBlock DockPanel.Dock="Right"
+                                                                       Text="{Binding RemainingFramesText}"
+                                                                       Style="{StaticResource MutedText}" />
+                                                        </DockPanel>
+                                                    </StackPanel>
+                                                </Border>
+                                                <UniformGrid Columns="2" Margin="0,12,-8,4">
+                                                    <Border Style="{StaticResource MetricTile}">
+                                                        <StackPanel>
+                                                            <TextBlock Text="Time remaining" Style="{StaticResource MutedText}" />
+                                                            <TextBlock Text="{Binding EstimatedRemainingText}"
+                                                                       FontWeight="SemiBold"
+                                                                       Margin="0,5,0,0" />
+                                                        </StackPanel>
+                                                    </Border>
+                                                    <Border Style="{StaticResource MetricTile}">
+                                                        <StackPanel>
+                                                            <TextBlock Text="Integration" Style="{StaticResource MutedText}" />
+                                                            <TextBlock Text="{Binding IntegrationText}"
+                                                                       FontWeight="SemiBold"
+                                                                       Margin="0,5,0,0" />
+                                                        </StackPanel>
+                                                    </Border>
+                                                </UniformGrid>
+                                                <TextBlock Text="Session note" Style="{StaticResource FieldLabel}" />
+                                                <TextBox Text="{Binding SessionNotes, UpdateSourceTrigger=PropertyChanged}"
+                                                         Height="112"
+                                                         AcceptsReturn="True"
+                                                         VerticalScrollBarVisibility="Auto" />
+                                                <Button Content="Save note"
+                                                        Command="{Binding SaveSessionNoteCommand}"
+                                                        Style="{StaticResource ToolbarButton}"
+                                                        HorizontalAlignment="Right"
+                                                        Margin="0,8,0,0" />
+                                            </StackPanel>
+                                        </TabItem>
+
+                                        <TabItem Header="Timer">
+                                            <StackPanel>
+                                                <Border Style="{StaticResource HeroCard}">
+                                                    <StackPanel HorizontalAlignment="Center">
+                                                        <TextBlock Text="{Binding TimerPhaseText}"
+                                                                   Style="{StaticResource MutedText}"
+                                                                   HorizontalAlignment="Center" />
+                                                        <TextBlock Text="{Binding TimerCountdownText}"
+                                                                   FontFamily="Cascadia Mono, Consolas"
+                                                                   FontSize="43"
+                                                                   FontWeight="SemiBold"
+                                                                   HorizontalAlignment="Center"
+                                                                   Margin="0,3,0,0" />
+                                                        <TextBlock Text="{Binding TimerFrameText}"
+                                                                   Style="{StaticResource MutedText}"
+                                                                   HorizontalAlignment="Center" />
+                                                    </StackPanel>
+                                                </Border>
+                                                <Grid Margin="0,2,0,0">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="10" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel>
+                                                        <TextBlock Text="Exposure · seconds" Style="{StaticResource FieldLabel}" />
+                                                        <TextBox Text="{Binding TimerExposureSeconds}" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="2">
+                                                        <TextBlock Text="Delay · seconds" Style="{StaticResource FieldLabel}" />
+                                                        <TextBox Text="{Binding TimerDelaySeconds}" />
+                                                    </StackPanel>
+                                                </Grid>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="10" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel>
+                                                        <TextBlock Text="Frames" Style="{StaticResource FieldLabel}" />
+                                                        <TextBox Text="{Binding TimerFrameCount}" />
+                                                    </StackPanel>
+                                                    <StackPanel Grid.Column="2">
+                                                        <TextBlock Text="Initial delay" Style="{StaticResource FieldLabel}" />
+                                                        <TextBox Text="{Binding TimerInitialDelaySeconds}" />
+                                                    </StackPanel>
+                                                </Grid>
+                                                <CheckBox Content="Play timer sounds"
+                                                          IsChecked="{Binding TimerSound}"
+                                                          Margin="0,13,0,0" />
+                                                <Button Content="Start timer"
+                                                        Command="{Binding StartTimerCommand}"
+                                                        Style="{StaticResource AccentButton}"
+                                                        Margin="0,16,0,0" />
+                                                <UniformGrid Columns="3" Margin="0,8,0,0">
+                                                    <Button Content="Pause"
+                                                            Command="{Binding PauseTimerCommand}"
+                                                            Style="{StaticResource ToolbarButton}"
+                                                            Margin="0,0,4,0" />
+                                                    <Button Content="Resume"
+                                                            Command="{Binding ResumeTimerCommand}"
+                                                            Style="{StaticResource ToolbarButton}"
+                                                            Margin="4,0" />
+                                                    <Button Content="Stop"
+                                                            Command="{Binding StopTimerCommand}"
+                                                            Style="{StaticResource DangerButton}"
+                                                            Margin="4,0,0,0" />
+                                                </UniformGrid>
+                                                <Button Content="Open fullscreen timer"
+                                                        Command="{Binding ToggleTimerFullscreenCommand}"
+                                                        Style="{StaticResource ToolbarButton}"
+                                                        Margin="0,10,0,0" />
+                                            </StackPanel>
+                                        </TabItem>
+                                    </TabControl>
+                                </StackPanel>
+                            </ScrollViewer>
+
                         <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                                       VerticalScrollBarVisibility="Auto"
+                                      Visibility="Collapsed"
                                       PanningMode="VerticalFirst"
                                       PanningDeceleration="0.001"
                                       PanningRatio="1">
@@ -780,6 +1515,7 @@
                                 </WrapPanel>
                             </StackPanel>
                         </ScrollViewer>
+                        </Grid>
                     </Border>
                 </Grid>
 
@@ -822,15 +1558,89 @@
             </Grid>
 
             <Grid Visibility="{Binding IsHistory, Converter={StaticResource BoolToVisibility}}"
-                  Margin="14">
+                  Margin="24">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
-                    <RowDefinition Height="10" />
+                    <RowDefinition Height="16" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="16" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <Border Style="{StaticResource PanelCard}">
+                <StackPanel>
+                    <TextBlock Text="Session history" Style="{StaticResource PageTitle}" />
+                    <TextBlock Text="Review nights, compare results, and reuse the plans that worked."
+                               Style="{StaticResource PageSubtitle}" />
+                </StackPanel>
+
+                <Border Grid.Row="2" Style="{StaticResource PanelCard}">
                     <Grid>
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="2*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="Search sessions" Style="{StaticResource FieldLabel}" Margin="0,0,0,5" />
+                                    <TextBox Text="{Binding HistorySearchText, UpdateSourceTrigger=PropertyChanged}"
+                                             ToolTip="Search target, location, problems, and notes" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="Session type" Style="{StaticResource FieldLabel}" Margin="0,0,0,5" />
+                                    <ComboBox ItemsSource="{Binding HistoryTypeFilters}"
+                                              SelectedItem="{Binding SelectedHistoryTypeFilter}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="4">
+                                    <TextBlock Text="Sort by" Style="{StaticResource FieldLabel}" Margin="0,0,0,5" />
+                                    <ComboBox ItemsSource="{Binding HistorySortOptions}"
+                                              SelectedItem="{Binding SelectedHistorySort}" />
+                                </StackPanel>
+                                <Button Grid.Column="6"
+                                        Content="Apply"
+                                        Command="{Binding RefreshHistoryCommand}"
+                                        Style="{StaticResource AccentButton}"
+                                        VerticalAlignment="Bottom"
+                                        MinWidth="96" />
+                            </Grid>
+                            <Expander Header="More filters" Margin="0,13,0,0">
+                                <WrapPanel>
+                                    <StackPanel Width="185" Margin="0,0,12,10">
+                                        <TextBlock Text="Target" Style="{StaticResource FieldLabel}" Margin="0,0,0,5" />
+                                        <TextBox Text="{Binding HistoryTargetFilter}" />
+                                    </StackPanel>
+                                    <StackPanel Width="185" Margin="0,0,12,10">
+                                        <TextBlock Text="Location" Style="{StaticResource FieldLabel}" Margin="0,0,0,5" />
+                                        <TextBox Text="{Binding HistoryLocationFilter}" />
+                                    </StackPanel>
+                                    <StackPanel Width="145" Margin="0,0,12,10">
+                                        <TextBlock Text="From" Style="{StaticResource FieldLabel}" Margin="0,0,0,5" />
+                                        <DatePicker SelectedDate="{Binding HistoryFromDate}" />
+                                    </StackPanel>
+                                    <StackPanel Width="145" Margin="0,0,12,10">
+                                        <TextBlock Text="To" Style="{StaticResource FieldLabel}" Margin="0,0,0,5" />
+                                        <DatePicker SelectedDate="{Binding HistoryToDate}" />
+                                    </StackPanel>
+                                    <StackPanel Width="120" Margin="0,0,12,10">
+                                        <TextBlock Text="Minimum rating" Style="{StaticResource FieldLabel}" Margin="0,0,0,5" />
+                                        <ComboBox ItemsSource="{Binding HistoryRatingOptions}"
+                                                  SelectedItem="{Binding HistoryMinimumRating}" />
+                                    </StackPanel>
+                                    <Button Content="Clear"
+                                            Style="{StaticResource ToolbarButton}"
+                                            Click="ClearHistoryDates_OnClick"
+                                            VerticalAlignment="Bottom"
+                                            Margin="0,0,0,10" />
+                                </WrapPanel>
+                            </Expander>
+                        </StackPanel>
+
+                    <Grid Visibility="Collapsed">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -903,12 +1713,13 @@
                                     Click="ClearHistoryDates_OnClick" />
                         </WrapPanel>
                     </Grid>
+                    </Grid>
                 </Border>
 
-                <Grid Grid.Row="2">
+                <Grid Grid.Row="4">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="430" />
-                        <ColumnDefinition Width="10" />
+                        <ColumnDefinition Width="380" />
+                        <ColumnDefinition Width="16" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <Border Style="{StaticResource PanelCard}" Padding="8">
@@ -1100,16 +1911,20 @@
             </Grid>
 
             <Grid Visibility="{Binding IsSettings, Converter={StaticResource BoolToVisibility}}"
-                  Margin="14">
+                  Margin="24">
                 <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                               VerticalScrollBarVisibility="Auto"
                               PanningMode="VerticalFirst"
                               PanningDeceleration="0.001"
                               PanningRatio="1">
-                    <Grid MaxWidth="1180" HorizontalAlignment="Center">
+                    <StackPanel MaxWidth="1240" HorizontalAlignment="Center">
+                        <TextBlock Text="Settings" Style="{StaticResource PageTitle}" />
+                        <TextBlock Text="Tune the field workflow without cluttering the shooting screen."
+                                   Style="{StaticResource PageSubtitle}" />
+                    <Grid Margin="0,18,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="12" />
+                            <ColumnDefinition Width="16" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
 
@@ -1189,7 +2004,7 @@
                                     <CheckBox Content="Use live weather and automatic Windows location"
                                               IsChecked="{Binding EnableNetworkConditions}"
                                               Margin="0,8,0,0" />
-                                    <TextBlock Text="On by default. Windows location is tried first. If it is unavailable, BigDataCloud may estimate the area from the public IP address. Coordinates are sent to Open-Meteo to resolve the local time zone and current weather. Search text is sent only when you search. Screenshots, phone status, sessions, and logs are never uploaded."
+                                    <TextBlock Text="On by default. Windows location is tried first. If unavailable, BigDataCloud may estimate the area from the public IP address. Coordinates are sent to Open-Meteo for weather, elevation, and time-zone data. A broad public sky-brightness tile is requested for light-pollution estimates. Screenshots, phone status, sessions, and logs are never uploaded."
                                                Style="{StaticResource MutedText}"
                                                Margin="0,10,0,0" />
                                 </StackPanel>
@@ -1316,6 +2131,7 @@
                                        Margin="0,6,0,0" />
                         </StackPanel>
                     </Grid>
+                    </StackPanel>
                 </ScrollViewer>
             </Grid>
 
