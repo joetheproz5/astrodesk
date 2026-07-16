@@ -14,6 +14,22 @@ The project follows [Semantic Versioning](https://semver.org/) while pre-1.0 rel
 - A Windows Graphics Capture backend with Win32 fallback.
 - Signed installer packaging after a reproducible release process is established.
 
+## [0.1.2] - 2026-07-16
+
+### Added
+
+- A target-aware tonight score and best shooting window based on the hourly forecast, darkness, Moon position, skyglow, wind, humidity, dew spread, precipitation risk, and visibility.
+- Open-Meteo elevation plus 36 hours of hourly weather data for the detected or selected coordinate.
+- Current Moon altitude, compass direction, azimuth, and a 36-hour Moon track calculated locally.
+- Objective 2024 zenith-brightness estimates from the public David Lorenz Light Pollution Atlas, including atlas zone, artificial-to-natural brightness ratio, and estimated mag/arcsec².
+- Tests for recommendation quality, target-specific weighting, hourly weather parsing, Moon tracking, and compressed light-pollution tile decoding.
+
+### Changed
+
+- Astronomy and recommended-window times now render in the selected coordinate's resolved time zone instead of assuming the laptop's current zone.
+- The conditions panel now leads with altitude and a concise tonight verdict while retaining the full weather, darkness, and Moon detail.
+- Light-pollution results are deliberately not labeled as a Bortle class because Bortle assessment is subjective and considers the whole visible sky.
+
 ## [0.1.1] - 2026-07-16
 
 ### Added

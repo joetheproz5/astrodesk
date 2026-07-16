@@ -30,6 +30,15 @@ public enum DewRisk
     High
 }
 
+public enum ObservingQuality
+{
+    Unavailable,
+    Poor,
+    Fair,
+    Good,
+    Excellent
+}
+
 public enum SessionNoteKind
 {
     General,

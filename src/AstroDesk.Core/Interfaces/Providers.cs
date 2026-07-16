@@ -21,6 +21,15 @@ public interface IAstronomyProvider
         CancellationToken cancellationToken = default);
 }
 
+public interface ILightPollutionProvider
+{
+    string Name { get; }
+
+    Task<LightPollutionConditions?> GetConditionsAsync(
+        GeoCoordinate coordinate,
+        CancellationToken cancellationToken = default);
+}
+
 public interface ILocationProvider
 {
     string Name { get; }

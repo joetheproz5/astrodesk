@@ -25,7 +25,8 @@ public sealed class AstronomyEngineProvider(
                 date.ToDateTime(new TimeOnly(12, 0)),
                 DateTimeKind.Utc);
             AstroTime searchStart = new(noonUtc);
-            AstroTime now = new(DateTime.UtcNow);
+            DateTimeOffset calculatedAt = DateTimeOffset.UtcNow;
+            AstroTime now = new(calculatedAt.UtcDateTime);
             Observer observer = new(coordinate.Latitude, coordinate.Longitude, 0);
 
             AstroTime? sunset = Astronomy.SearchRiseSet(
@@ -107,7 +108,10 @@ public sealed class AstronomyEngineProvider(
                 darkStart,
                 darkEnd,
                 Name,
-                DateTimeOffset.UtcNow);
+                calculatedAt,
+                horizontal.azimuth,
+                GetCompassDirection(horizontal.azimuth),
+                CalculateHourlyMoonPositions(observer, calculatedAt, 36));
 
             return Task.FromResult<AstronomyConditions?>(result);
         }
@@ -137,5 +141,64 @@ public sealed class AstronomyEngineProvider(
             < 292.5 => "Third Quarter",
             _ => "Waning Crescent",
         };
+    }
+
+    private static IReadOnlyList<HourlyMoonPosition> CalculateHourlyMoonPositions(
+        Observer observer,
+        DateTimeOffset start,
+        int hours)
+    {
+        List<HourlyMoonPosition> positions = new(hours + 1);
+        for (int hour = 0; hour <= hours; hour++)
+        {
+            DateTimeOffset time = start.AddHours(hour);
+            AstroTime astroTime = new(time.UtcDateTime);
+            Equatorial equatorial = Astronomy.Equator(
+                Body.Moon,
+                astroTime,
+                observer,
+                EquatorEpoch.OfDate,
+                Aberration.Corrected);
+            Topocentric horizontal = Astronomy.Horizon(
+                astroTime,
+                observer,
+                equatorial.ra,
+                equatorial.dec,
+                Refraction.Normal);
+            positions.Add(
+                new HourlyMoonPosition(
+                    time,
+                    horizontal.altitude,
+                    horizontal.azimuth));
+        }
+
+        return positions;
+    }
+
+    private static string GetCompassDirection(double azimuth)
+    {
+        string[] directions =
+        [
+            "N",
+            "NNE",
+            "NE",
+            "ENE",
+            "E",
+            "ESE",
+            "SE",
+            "SSE",
+            "S",
+            "SSW",
+            "SW",
+            "WSW",
+            "W",
+            "WNW",
+            "NW",
+            "NNW",
+        ];
+        double normalized = ((azimuth % 360) + 360) % 360;
+        int index = (int)Math.Round(normalized / 22.5, MidpointRounding.AwayFromZero) %
+                    directions.Length;
+        return directions[index];
     }
 }

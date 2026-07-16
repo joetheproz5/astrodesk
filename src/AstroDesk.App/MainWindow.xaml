@@ -208,6 +208,10 @@
                                            Style="{StaticResource MutedText}"
                                            TextWrapping="Wrap"
                                            Margin="0,3,0,0" />
+                                <TextBlock Text="{Binding AltitudeText, StringFormat=Altitude: {0}}"
+                                           Style="{StaticResource MutedText}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,3,0,0" />
                                 <UniformGrid Columns="2" Margin="0,8,0,0">
                                     <Button Content="Locate me"
                                             Command="{Binding LocateCurrentUserCommand}"
@@ -253,6 +257,58 @@
                                 </Grid>
 
                                 <Border Style="{StaticResource SeparatorLine}" />
+                                <TextBlock Text="TONIGHT" Style="{StaticResource SectionTitle}" />
+                                <Border Background="{DynamicResource AccentMutedBrush}"
+                                        BorderBrush="{DynamicResource AccentBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding ShootingRecommendationText}"
+                                                   TextWrapping="Wrap">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock"
+                                                       BasedOn="{StaticResource MetricValue}">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding ShootQualityLevel}" Value="Excellent">
+                                                            <Setter Property="Foreground" Value="{DynamicResource SuccessBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding ShootQualityLevel}" Value="Good">
+                                                            <Setter Property="Foreground" Value="{DynamicResource AccentBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding ShootQualityLevel}" Value="Fair">
+                                                            <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding ShootQualityLevel}" Value="Poor">
+                                                            <Setter Property="Foreground" Value="{DynamicResource DangerBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding ShootQualityLevel}" Value="Unavailable">
+                                                            <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                        <Grid Margin="0,8,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding ShootingScoreText, StringFormat=Score: {0}}"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding BestShootingWindowText, StringFormat=Best: {0}}"
+                                                       TextAlignment="Right"
+                                                       TextWrapping="Wrap" />
+                                        </Grid>
+                                        <TextBlock Text="{Binding ShootingAdviceText}"
+                                                   Style="{StaticResource MutedText}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,7,0,0" />
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Style="{StaticResource SeparatorLine}" />
                                 <TextBlock Text="WEATHER" Style="{StaticResource SectionTitle}" />
                                 <Grid>
                                     <Grid.ColumnDefinitions>
@@ -267,6 +323,8 @@
                                         <TextBlock Text="{Binding CloudCoverText}" Style="{StaticResource MetricValue}" />
                                         <TextBlock Text="Wind" Style="{StaticResource FieldLabel}" />
                                         <TextBlock Text="{Binding WindText}" Style="{StaticResource MetricValue}" />
+                                        <TextBlock Text="Rain chance" Style="{StaticResource FieldLabel}" />
+                                        <TextBlock Text="{Binding PrecipitationText}" Style="{StaticResource MetricValue}" />
                                     </StackPanel>
                                     <StackPanel Grid.Column="2">
                                         <TextBlock Text="Humidity" Style="{StaticResource FieldLabel}" />
@@ -285,6 +343,21 @@
                                         Margin="0,12,0,0">
                                     <TextBlock Text="{Binding DewRiskText, StringFormat=Dew risk: {0}}" />
                                 </Border>
+
+                                <Border Style="{StaticResource SeparatorLine}" />
+                                <TextBlock Text="SKY QUALITY" Style="{StaticResource SectionTitle}" />
+                                <TextBlock Text="{Binding LightPollutionText}"
+                                           Style="{StaticResource MetricValue}"
+                                           TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding LightPollutionDetailText}"
+                                           Style="{StaticResource MutedText}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,4,0,0" />
+                                <TextBlock Text="Objective zenith-brightness estimate; not a claimed Bortle class."
+                                           Style="{StaticResource MutedText}"
+                                           FontSize="11"
+                                           TextWrapping="Wrap"
+                                           Margin="0,5,0,0" />
 
                                 <Border Style="{StaticResource SeparatorLine}" />
                                 <TextBlock Text="DARKNESS" Style="{StaticResource SectionTitle}" />
@@ -335,8 +408,13 @@
                                     <TextBlock Grid.Column="1" Text="{Binding MoonriseText}" />
                                     <TextBlock Grid.Row="1" Text="Moonset" Style="{StaticResource MutedText}" Margin="0,7,0,0" />
                                     <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding MoonsetText}" Margin="0,7,0,0" />
-                                    <TextBlock Grid.Row="2" Text="Altitude now" Style="{StaticResource MutedText}" Margin="0,7,0,0" />
-                                    <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding MoonAltitudeText}" Margin="0,7,0,0" />
+                                    <TextBlock Grid.Row="2" Text="Position now" Style="{StaticResource MutedText}" Margin="0,7,0,0" />
+                                    <TextBlock Grid.Row="2"
+                                               Grid.Column="1"
+                                               Text="{Binding MoonPositionText}"
+                                               Margin="0,7,0,0"
+                                               TextAlignment="Right"
+                                               TextWrapping="Wrap" />
                                 </Grid>
                                 <TextBlock Text="{Binding ConditionsUpdatedText}"
                                            Style="{StaticResource MutedText}"
