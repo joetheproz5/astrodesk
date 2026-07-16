@@ -14,6 +14,19 @@ The project follows [Semantic Versioning](https://semver.org/) while pre-1.0 rel
 - A Windows Graphics Capture backend with Win32 fallback.
 - Signed installer packaging after a reproducible release process is established.
 
+## [0.1.3] - 2026-07-16
+
+### Changed
+
+- Rebuilt the shooting dashboard around the embedded phone preview with wider, calmer side panels and substantially more breathing room.
+- Replaced the orange-brown palette with a moonlit blue/slate visual system, softer surfaces, larger typography, rounded controls, and clearer selected/navigation states.
+- Reorganized conditions into a concise Night Brief with location, tonight's verdict, weather tiles, sky quality, darkness, and Moon cards.
+- Split the shooting workflow into focused Plan, Progress, and Timer tabs instead of one long crowded form.
+- Moved secondary phone and framing actions into touch-friendly overflow menus while keeping the most-used controls immediately available.
+- Redesigned History with a clear page header, primary filter row, collapsible advanced filters, and a better-balanced list/detail layout.
+- Refreshed Settings with stronger page hierarchy, wider spacing, and updated online-provider privacy language.
+- Preserved touchscreen panning, inertia, full red mode, keyboard shortcuts, and every existing shooting control.
+
 ## [0.1.2] - 2026-07-16
 
 ### Added
