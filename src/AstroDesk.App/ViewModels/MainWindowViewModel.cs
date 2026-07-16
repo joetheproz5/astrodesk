@@ -57,6 +57,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private bool _initialized;
     private bool _initializing;
     private bool _selectingLocation;
+    private bool _suppressLocationRefresh;
     private long _conditionsRequestVersion;
     private PreviewFrameSnapshot? _pendingPreviewFrame;
     private int _previewDispatchScheduled;
@@ -327,6 +328,15 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     [ObservableProperty]
     private double _longitude = 35.8258;
+
+    [ObservableProperty]
+    private string _locationStatusText = "Locating this laptop…";
+
+    [ObservableProperty]
+    private string _locationCoordinateText = "Waiting for location";
+
+    [ObservableProperty]
+    private string _timeZoneText = "Detecting time zone…";
 
     [ObservableProperty]
     private string _cameraName = "Samsung Galaxy S23 Ultra";
@@ -615,6 +625,11 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             await LoadSettingsAsync(cancellationToken).ConfigureAwait(true);
             await LoadLocationsAsync(cancellationToken).ConfigureAwait(true);
             await RecoverSessionAsync(cancellationToken).ConfigureAwait(true);
+            if (EnableNetworkConditions && _activeSession is null)
+            {
+                await LocateCurrentUserAsync(cancellationToken).ConfigureAwait(true);
+            }
+
             await RefreshHistoryAsync(cancellationToken).ConfigureAwait(true);
             await RefreshConditionsAsync(cancellationToken).ConfigureAwait(true);
             await _deviceMonitor.PollOnceAsync(cancellationToken).ConfigureAwait(true);
@@ -1249,24 +1264,28 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         try
         {
             GeoCoordinate coordinate = new(Latitude, Longitude);
-            Task<WeatherConditions?> weatherTask = EnableNetworkConditions
-                ? _weatherProvider.GetCurrentAsync(coordinate, cancellationToken)
-                : Task.FromResult<WeatherConditions?>(null);
-            Task<AstronomyConditions?> astronomyTask = _astronomyProvider.GetConditionsAsync(
+            WeatherConditions? weather = EnableNetworkConditions
+                ? await _weatherProvider
+                    .GetCurrentAsync(coordinate, cancellationToken)
+                    .ConfigureAwait(true)
+                : null;
+            AstronomyConditions? astronomy = await _astronomyProvider.GetConditionsAsync(
                 coordinate,
-                DateOnly.FromDateTime(DateTime.Now),
-                cancellationToken);
-            await Task.WhenAll(weatherTask, astronomyTask).ConfigureAwait(true);
+                GetLocationDate(weather?.TimeZoneId ?? SelectedLocation?.TimeZoneId),
+                cancellationToken).ConfigureAwait(true);
 
             if (requestVersion != Volatile.Read(ref _conditionsRequestVersion))
             {
                 return;
             }
 
-            _latestWeather = await weatherTask.ConfigureAwait(true);
-            _latestAstronomy = await astronomyTask.ConfigureAwait(true);
+            _latestWeather = weather;
+            _latestAstronomy = astronomy;
             UpdateConditionsDisplay();
-            ConditionsUpdatedText = $"Updated {DateTime.Now:t}";
+            ConditionsUpdatedText = BuildConditionsUpdatedText(
+                _latestWeather,
+                _latestAstronomy,
+                EnableNetworkConditions);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1275,6 +1294,90 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         {
             _logger.LogWarning(exception, "Conditions refresh failed.");
             StatusMessage = $"Conditions unavailable: {exception.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private async Task LocateCurrentUserAsync(CancellationToken cancellationToken)
+    {
+        if (!EnableNetworkConditions)
+        {
+            LocationStatusText = "Automatic location is off";
+            StatusMessage = "Enable live weather and automatic location in Settings first.";
+            return;
+        }
+
+        LocationStatusText = "Locating this laptop…";
+        LocationCoordinateText = "Waiting for Windows location";
+        TimeZoneText = "Detecting time zone…";
+
+        LocationSearchResult? result = await _locationProvider
+            .GetCurrentAsync(cancellationToken)
+            .ConfigureAwait(true);
+        if (result is null)
+        {
+            LocationStatusText = SelectedLocation is null
+                ? "Automatic location unavailable"
+                : $"Automatic location unavailable · using {SelectedLocation.Name}";
+            LocationCoordinateText = SelectedLocation?.CoordinateText
+                                     ?? $"{Latitude:0.####}, {Longitude:0.####}";
+            TimeZoneText = FormatTimeZoneLabel(SelectedLocation?.TimeZoneId);
+            StatusMessage =
+                "Windows could not determine this laptop's location. Turn on Location services or choose a fallback location.";
+            if (_initialized)
+            {
+                await RefreshConditionsAsync(cancellationToken).ConfigureAwait(true);
+            }
+
+            return;
+        }
+
+        LocationOption automaticLocation = AddLocationIfMissing(
+            LocationOption.FromSearchResult(result));
+        _suppressLocationRefresh = true;
+        try
+        {
+            SelectedLocation = automaticLocation;
+        }
+        finally
+        {
+            _suppressLocationRefresh = false;
+        }
+
+        bool isIpEstimate = automaticLocation.Name.Contains(
+            "(IP estimate)",
+            StringComparison.OrdinalIgnoreCase);
+        LocationStatusText = isIpEstimate
+            ? "Using approximate network location"
+            : "Using this laptop's current location";
+        LocationCoordinateText = automaticLocation.CoordinateText;
+        TimeZoneText = FormatTimeZoneLabel(automaticLocation.TimeZoneId);
+        StatusMessage = isIpEstimate
+            ? "Windows location was unavailable. Loading live conditions from an approximate public-IP location."
+            : "Current location detected. Loading live conditions for this area.";
+
+        if (_initialized)
+        {
+            await RefreshConditionsAsync(cancellationToken).ConfigureAwait(true);
+        }
+    }
+
+    [RelayCommand]
+    private void OpenLocationSettings()
+    {
+        try
+        {
+            Process.Start(
+                new ProcessStartInfo("ms-settings:privacy-location")
+                {
+                    UseShellExecute = true,
+                });
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or
+                System.ComponentModel.Win32Exception)
+        {
+            StatusMessage = $"Windows Location settings could not be opened: {exception.Message}";
         }
     }
 
@@ -1574,6 +1677,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             await settings.SetAsync("Experimental.CaptureControls", EnableExperimentalCaptureControls, "Experimental", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Experimental.ShutterX", ExperimentalShutterX, "Experimental", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Experimental.ShutterY", ExperimentalShutterY, "Experimental", _lifetimeCancellation.Token).ConfigureAwait(true);
+            await settings.SetAsync("Privacy.LiveConditionsEnabled", EnableNetworkConditions, "Privacy", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Privacy.EnableNetworkConditions", EnableNetworkConditions, "Privacy", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Overlay.RuleOfThirds", RuleOfThirds, "Overlay", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Overlay.Crosshair", Crosshair, "Overlay", _lifetimeCancellation.Token).ConfigureAwait(true);
@@ -1629,7 +1733,17 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             _selectingLocation = false;
         }
 
-        if (_initialized)
+        LocationStatusText = value.Name.Equals(
+                "Current device location",
+                StringComparison.OrdinalIgnoreCase)
+            ? "Using this laptop's current location"
+            : value.Name.Contains("(IP estimate)", StringComparison.OrdinalIgnoreCase)
+                ? "Using approximate network location"
+                : $"Using selected location: {value.Name}";
+        LocationCoordinateText = value.CoordinateText;
+        TimeZoneText = FormatTimeZoneLabel(value.TimeZoneId);
+
+        if (_initialized && !_suppressLocationRefresh)
         {
             _ = RefreshConditionsAsync(_lifetimeCancellation.Token);
         }
@@ -1649,6 +1763,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (!_selectingLocation)
         {
             SelectedLocation = null;
+            UpdateManualLocationDisplay();
             if (_initialized)
             {
                 _ = RefreshConditionsAsync(_lifetimeCancellation.Token);
@@ -1661,6 +1776,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         if (!_selectingLocation)
         {
             SelectedLocation = null;
+            UpdateManualLocationDisplay();
             if (_initialized)
             {
                 _ = RefreshConditionsAsync(_lifetimeCancellation.Token);
@@ -1713,7 +1829,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     {
         if (_initialized)
         {
-            _ = RefreshConditionsAsync(_lifetimeCancellation.Token);
+            _ = value
+                ? LocateCurrentUserAsync(_lifetimeCancellation.Token)
+                : RefreshConditionsAsync(_lifetimeCancellation.Token);
         }
     }
 
@@ -1748,8 +1866,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         EnableExperimentalCaptureControls = await settings.GetAsync("Experimental.CaptureControls", EnableExperimentalCaptureControls, cancellationToken);
         ExperimentalShutterX = await settings.GetAsync("Experimental.ShutterX", 0, cancellationToken);
         ExperimentalShutterY = await settings.GetAsync("Experimental.ShutterY", 0, cancellationToken);
+        // The 0.1.1 key intentionally replaces the disabled-by-default 0.1.0 setting.
         EnableNetworkConditions = await settings.GetAsync(
-            "Privacy.EnableNetworkConditions",
+            "Privacy.LiveConditionsEnabled",
             EnableNetworkConditions,
             cancellationToken);
         RuleOfThirds = await settings.GetAsync("Overlay.RuleOfThirds", RuleOfThirds, cancellationToken);
@@ -2065,6 +2184,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         VisibilityText = Format(weather?.VisibilityKilometers, "0.0", " km");
         DewPointText = Format(weather?.DewPointCelsius, "0.0", " °C");
         DewRiskText = weather?.DewRisk.ToString() ?? "Unavailable";
+        TimeZoneText = FormatTimeZoneLabel(
+            weather?.TimeZoneId ?? SelectedLocation?.TimeZoneId,
+            weather?.TimeZoneAbbreviation);
 
         AstronomyConditions? astronomy = _latestAstronomy;
         SunsetText = FormatTime(astronomy?.Sunset);
@@ -2183,17 +2305,87 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private void AddLocationIfMissing(LocationOption location)
+    private LocationOption AddLocationIfMissing(LocationOption location)
     {
-        if (Locations.Any(
-                existing =>
-                    Math.Abs(existing.Latitude - location.Latitude) < 0.00001 &&
-                    Math.Abs(existing.Longitude - location.Longitude) < 0.00001))
+        LocationOption? existingLocation = Locations.FirstOrDefault(
+            existing =>
+                Math.Abs(existing.Latitude - location.Latitude) < 0.00001 &&
+                Math.Abs(existing.Longitude - location.Longitude) < 0.00001);
+        if (existingLocation is not null)
         {
-            return;
+            return existingLocation;
         }
 
         Locations.Add(location);
+        return location;
+    }
+
+    private void UpdateManualLocationDisplay()
+    {
+        LocationStatusText = "Using manual coordinates";
+        LocationCoordinateText = $"{Latitude:0.####}, {Longitude:0.####}";
+        TimeZoneText = EnableNetworkConditions
+            ? "Resolving from live weather…"
+            : FormatTimeZoneLabel(TimeZoneInfo.Local.Id);
+    }
+
+    private static DateOnly GetLocationDate(string? timeZoneId)
+    {
+        if (!string.IsNullOrWhiteSpace(timeZoneId))
+        {
+            try
+            {
+                TimeZoneInfo timeZone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+                DateTimeOffset localNow = TimeZoneInfo.ConvertTime(
+                    DateTimeOffset.UtcNow,
+                    timeZone);
+                return DateOnly.FromDateTime(localNow.DateTime);
+            }
+            catch (TimeZoneNotFoundException)
+            {
+            }
+            catch (InvalidTimeZoneException)
+            {
+            }
+        }
+
+        return DateOnly.FromDateTime(DateTime.Now);
+    }
+
+    private static string BuildConditionsUpdatedText(
+        WeatherConditions? weather,
+        AstronomyConditions? astronomy,
+        bool networkEnabled)
+    {
+        if (weather is not null)
+        {
+            string provider = weather.ProviderName ?? "Live weather";
+            return $"{provider} · observed {weather.ObservedAt:HH:mm}";
+        }
+
+        if (astronomy is not null)
+        {
+            return networkEnabled
+                ? $"Weather unavailable · astronomy updated {DateTime.Now:t}"
+                : $"Live weather off · astronomy updated {DateTime.Now:t}";
+        }
+
+        return "Conditions unavailable";
+    }
+
+    private static string FormatTimeZoneLabel(
+        string? timeZoneId,
+        string? abbreviation = null)
+    {
+        if (string.IsNullOrWhiteSpace(timeZoneId))
+        {
+            return "Time zone unavailable";
+        }
+
+        return string.IsNullOrWhiteSpace(abbreviation) ||
+               abbreviation.Equals(timeZoneId, StringComparison.OrdinalIgnoreCase)
+            ? timeZoneId
+            : $"{timeZoneId} ({abbreviation})";
     }
 
     private void ValidateSessionInputs()

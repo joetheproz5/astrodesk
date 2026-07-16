@@ -94,7 +94,7 @@ Deleting the application does not automatically delete user session data.
 
 ### Network providers
 
-Online conditions and geocoding are disabled by default. When the user enables them, Open-Meteo weather requests contain the selected coordinates and geocoding requests contain search text. These requests are subject to the provider's network and privacy behavior.
+Online conditions and automatic location are enabled by default for new installations and can be disabled in Settings. Windows controls the precise location permission prompt. If Windows Location is unavailable, AstroDesk can contact BigDataCloud, which observes the public IP address and returns an approximate city-level location and time zone. Open-Meteo weather requests then contain the detected, estimated, or selected coordinates so the service can return current conditions and the local time zone; geocoding requests contain search text. These requests are subject to each provider's network and privacy behavior.
 
 AstroDesk does not send:
 

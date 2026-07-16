@@ -28,5 +28,5 @@ public sealed class AstroDeskAppOptions
 
     public bool EnableExperimentalCaptureControls { get; set; }
 
-    public bool EnableNetworkConditions { get; set; }
+    public bool EnableNetworkConditions { get; set; } = true;
 }

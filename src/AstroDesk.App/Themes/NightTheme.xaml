@@ -195,7 +195,10 @@
                                     MaxHeight="{TemplateBinding MaxDropDownHeight}">
                                 <ScrollViewer Margin="3"
                                               CanContentScroll="True"
-                                              VerticalScrollBarVisibility="Auto">
+                                              VerticalScrollBarVisibility="Auto"
+                                              PanningMode="VerticalFirst"
+                                              PanningDeceleration="0.001"
+                                              PanningRatio="1">
                                     <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained" />
                                 </ScrollViewer>
                             </Border>
@@ -503,6 +506,9 @@
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+        <Setter Property="ScrollViewer.PanningMode" Value="VerticalFirst" />
+        <Setter Property="ScrollViewer.PanningDeceleration" Value="0.001" />
+        <Setter Property="ScrollViewer.PanningRatio" Value="1" />
     </Style>
 
     <Style TargetType="ListBoxItem">
