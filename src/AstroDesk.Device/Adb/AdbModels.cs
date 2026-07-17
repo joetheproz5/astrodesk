@@ -39,6 +39,11 @@ public sealed record AdbDeviceList(IReadOnlyList<AdbDevice> Devices)
         "Unlock the phone, accept the USB debugging authorization prompt, optionally select 'Always allow', then reconnect.";
 }
 
+public sealed record AdbMdnsService(
+    string InstanceName,
+    string ServiceType,
+    string Endpoint);
+
 public enum AdbConnectionState
 {
     Disconnected,

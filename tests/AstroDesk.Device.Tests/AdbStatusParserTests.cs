@@ -5,6 +5,24 @@ namespace AstroDesk.Device.Tests;
 public sealed class AdbStatusParserTests
 {
     [Fact]
+    public void MdnsParser_ReadsPairingAndConnectServices()
+    {
+        const string output = """
+            List of discovered mdns services
+            adb-ABC123-QXjCrW  _adb-tls-pairing._tcp  192.168.1.101:34941
+            studio-A1b2C3d4E5  _adb-tls-pairing._tcp  192.168.1.101:40117
+            adb-ABC123-TnSdi9  _adb-tls-connect._tcp  192.168.1.101:37777
+            """;
+
+        IReadOnlyList<AdbMdnsService> services = AdbMdnsParser.Parse(output);
+
+        Assert.Equal(3, services.Count);
+        Assert.Equal("studio-A1b2C3d4E5", services[1].InstanceName);
+        Assert.Equal("_adb-tls-pairing._tcp", services[1].ServiceType);
+        Assert.Equal("192.168.1.101:40117", services[1].Endpoint);
+    }
+
+    [Fact]
     public void Parsers_ReadAvailablePhoneStatusValues()
     {
         const string propertiesOutput = """

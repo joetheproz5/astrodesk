@@ -46,6 +46,9 @@ public interface IAdbWirelessClient
         string pairingCode,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<AdbMdnsService>> GetMdnsServicesAsync(
+        CancellationToken cancellationToken = default);
+
     Task ConnectWirelessAsync(
         string endpoint,
         CancellationToken cancellationToken = default);
@@ -362,7 +365,28 @@ public sealed class AdbService : IAdbCommandExecutor, IAdbDeviceClient, IAdbWire
             ["pair", safeEndpoint, secret],
             [safeEndpoint, secret],
             cancellationToken).ConfigureAwait(false);
+        if (!result.Succeeded &&
+            (result.StandardError.Contains("protocol fault", StringComparison.OrdinalIgnoreCase) ||
+             result.StandardOutput.Contains("protocol fault", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new AdbCommandException(
+                "pair",
+                result.ExitCode,
+                "The phone did not answer at the temporary pairing address. Keep the 'Pair device with pairing code' screen open, use the current IP and port shown there, and make sure both devices are on the same Wi-Fi without a VPN or guest-network isolation.");
+        }
+
         EnsureSucceeded(result, "pair", [safeEndpoint, secret]);
+    }
+
+    public async Task<IReadOnlyList<AdbMdnsService>> GetMdnsServicesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        ProcessExecutionResult result = await ExecuteAsync(
+            null,
+            ["mdns", "services"],
+            cancellationToken).ConfigureAwait(false);
+        EnsureSucceeded(result, "mdns services");
+        return AdbMdnsParser.Parse(result.StandardOutput);
     }
 
     public async Task<string> ResolveConnectedSerialAsync(
