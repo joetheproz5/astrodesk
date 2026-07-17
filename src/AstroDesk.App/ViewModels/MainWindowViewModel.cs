@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Media;
+using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -26,6 +27,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using QRCoder;
 
 namespace AstroDesk.App.ViewModels;
 
@@ -65,6 +67,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private long _conditionsRequestVersion;
     private PreviewFrameSnapshot? _pendingPreviewFrame;
     private int _previewDispatchScheduled;
+    private CancellationTokenSource? _wirelessQrCancellation;
 
     public MainWindowViewModel(
         IServiceScopeFactory scopeFactory,
@@ -231,6 +234,12 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     [ObservableProperty]
     private bool _isWirelessBusy;
+
+    [ObservableProperty]
+    private bool _isWirelessQrActive;
+
+    [ObservableProperty]
+    private ImageSource? _wirelessQrCodeImage;
 
     [ObservableProperty]
     private ImageSource? _previewImage;
@@ -728,6 +737,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        _wirelessQrCancellation?.Cancel();
+        _wirelessQrCancellation?.Dispose();
+        _wirelessQrCancellation = null;
         _lifetimeCancellation.Cancel();
         _elapsedTimer.Stop();
         _preview.FrameReady -= HandlePreviewFrame;
@@ -956,7 +968,32 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 throw new InvalidOperationException("Enter the six-digit pairing code shown on the phone.");
             }
 
-            WirelessStatus = $"Pairing with {endpoint}…";
+            IReadOnlyList<AdbMdnsService> discovered;
+            try
+            {
+                discovered = await _adbWireless.GetMdnsServicesAsync(
+                    _lifetimeCancellation.Token).ConfigureAwait(true);
+            }
+            catch (Exception exception)
+            {
+                _logger.LogDebug(exception, "Could not refresh the temporary pairing address; using the address entered by the user.");
+                discovered = [];
+            }
+            AdbMdnsService[] pairingServices = discovered
+                .Where(static service => service.ServiceType == "_adb-tls-pairing._tcp")
+                .Where(static service => service.InstanceName.StartsWith("adb-", StringComparison.Ordinal))
+                .ToArray();
+            if (pairingServices.Length == 1 && pairingServices[0].Endpoint != endpoint)
+            {
+                endpoint = pairingServices[0].Endpoint;
+                WirelessPairingEndpoint = endpoint;
+                WirelessStatus = $"Found the phone's current temporary pairing address: {endpoint}. Pairing…";
+            }
+            else
+            {
+                WirelessStatus = $"Pairing with {endpoint}…";
+            }
+
             await _adbWireless.PairWirelessAsync(
                 endpoint,
                 code,
@@ -974,6 +1011,130 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         {
             IsWirelessBusy = false;
         }
+    }
+
+    [RelayCommand]
+    private async Task FindPairingAddressAsync()
+    {
+        if (IsWirelessBusy)
+        {
+            return;
+        }
+
+        IsWirelessBusy = true;
+        try
+        {
+            WirelessStatus = "Looking for the open pairing-code screen on this Wi-Fi…";
+            IReadOnlyList<AdbMdnsService> services = await _adbWireless.GetMdnsServicesAsync(
+                _lifetimeCancellation.Token).ConfigureAwait(true);
+            AdbMdnsService[] pairingServices = services
+                .Where(static service => service.ServiceType == "_adb-tls-pairing._tcp")
+                .Where(static service => service.InstanceName.StartsWith("adb-", StringComparison.Ordinal))
+                .ToArray();
+            if (pairingServices.Length == 0)
+            {
+                WirelessStatus = "No pairing-code screen was found. Keep that screen open on the S23 and make sure both devices are on the same Wi-Fi.";
+                return;
+            }
+
+            if (pairingServices.Length > 1)
+            {
+                WirelessStatus = "More than one phone is offering ADB pairing. Enter the address shown on the intended S23.";
+                return;
+            }
+
+            WirelessPairingEndpoint = pairingServices[0].Endpoint;
+            WirelessStatus = $"Found {pairingServices[0].Endpoint}. Enter the six-digit code, then tap Pair phone.";
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Could not discover a wireless ADB pairing service.");
+            WirelessStatus = $"Pairing discovery failed: {exception.Message}";
+        }
+        finally
+        {
+            IsWirelessBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task StartQrPairingAsync()
+    {
+        if (IsWirelessBusy)
+        {
+            return;
+        }
+
+        _wirelessQrCancellation?.Cancel();
+        _wirelessQrCancellation?.Dispose();
+        var cancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token);
+        _wirelessQrCancellation = cancellation;
+
+        string serviceName = $"studio-{CreateRandomQrToken(10)}";
+        string password = CreateRandomQrToken(12);
+        string payload = $"WIFI:T:ADB;S:{serviceName};P:{password};;";
+        WirelessQrCodeImage = CreateQrCodeImage(payload);
+        IsWirelessQrActive = true;
+        IsWirelessBusy = true;
+        WirelessStatus = "On the S23, open Wireless debugging → Pair device with QR code, then scan this code.";
+
+        try
+        {
+            DateTimeOffset deadline = DateTimeOffset.UtcNow.AddMinutes(2);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                cancellation.Token.ThrowIfCancellationRequested();
+                IReadOnlyList<AdbMdnsService> services = await _adbWireless.GetMdnsServicesAsync(
+                    cancellation.Token).ConfigureAwait(true);
+                AdbMdnsService? pairingService = services.FirstOrDefault(
+                    service => service.InstanceName == serviceName &&
+                               service.ServiceType == "_adb-tls-pairing._tcp");
+                if (pairingService is not null)
+                {
+                    WirelessStatus = $"S23 found at {pairingService.Endpoint}. Finishing secure pairing…";
+                    await _adbWireless.PairWirelessAsync(
+                        pairingService.Endpoint,
+                        password,
+                        cancellation.Token).ConfigureAwait(true);
+                    await Task.Delay(TimeSpan.FromSeconds(1), cancellation.Token).ConfigureAwait(true);
+                    await _deviceMonitor.PollOnceAsync(cancellation.Token).ConfigureAwait(true);
+                    WirelessStatus = "QR pairing complete. The S23 should connect automatically; if it does not, use the Connect address shown on the main Wireless debugging screen.";
+                    StatusMessage = "Wireless ADB QR pairing completed.";
+                    return;
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellation.Token).ConfigureAwait(true);
+            }
+
+            WirelessStatus = "QR pairing timed out. Keep the QR scanner open, stay on the same Wi-Fi, and try again.";
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            WirelessStatus = "QR pairing cancelled.";
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Could not pair wireless ADB with a QR code.");
+            WirelessStatus = $"QR pairing failed: {exception.Message}";
+        }
+        finally
+        {
+            if (ReferenceEquals(_wirelessQrCancellation, cancellation))
+            {
+                _wirelessQrCancellation = null;
+            }
+
+            cancellation.Dispose();
+            WirelessQrCodeImage = null;
+            IsWirelessQrActive = false;
+            IsWirelessBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private void CancelQrPairing()
+    {
+        _wirelessQrCancellation?.Cancel();
     }
 
     [RelayCommand]
@@ -1962,6 +2123,14 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    partial void OnShowWirelessPanelChanged(bool value)
+    {
+        if (!value)
+        {
+            _wirelessQrCancellation?.Cancel();
+        }
+    }
+
     partial void OnIsPreviewFullscreenChanged(bool value)
     {
         if (value)
@@ -2692,6 +2861,34 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                abbreviation.Equals(timeZoneId, StringComparison.OrdinalIgnoreCase)
             ? timeZoneId
             : $"{timeZoneId} ({abbreviation})";
+    }
+
+    private static string CreateRandomQrToken(int length)
+    {
+        const string alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+        var value = new char[length];
+        for (int index = 0; index < value.Length; index++)
+        {
+            value[index] = alphabet[RandomNumberGenerator.GetInt32(alphabet.Length)];
+        }
+
+        return new string(value);
+    }
+
+    private static ImageSource CreateQrCodeImage(string payload)
+    {
+        using var generator = new QRCodeGenerator();
+        using QRCodeData data = generator.CreateQrCode(payload, QRCodeGenerator.ECCLevel.Q);
+        using var qrCode = new PngByteQRCode(data);
+        byte[] png = qrCode.GetGraphic(14);
+        using var stream = new MemoryStream(png, writable: false);
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.StreamSource = stream;
+        image.EndInit();
+        image.Freeze();
+        return image;
     }
 
     private static string NormalizeWirelessEndpoint(string endpoint, bool addDefaultPort)

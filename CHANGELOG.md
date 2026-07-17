@@ -14,6 +14,23 @@ The project follows [Semantic Versioning](https://semver.org/) while pre-1.0 rel
 - A Windows Graphics Capture backend with Win32 fallback.
 - Signed installer packaging after a reproducible release process is established.
 
+## [0.1.9] - 2026-07-17
+
+### Added
+
+- Added genuine Android Wireless ADB QR pairing with a generated one-time secret, exact mDNS service matching, automatic endpoint discovery, and a two-minute cancellable scan window.
+- Added automatic discovery of the phone's current pairing-code address so an expired temporary port is replaced before pairing.
+
+### Fixed
+
+- Replaced ADB's opaque `protocol fault` failure with guidance that explains when the phone's temporary pairing screen or network path is no longer reachable.
+- Stopped ordinary touch buttons from retaining a hover/focus border after release; stateful toggles remain highlighted only while enabled.
+- Kept manual code pairing available when mDNS discovery itself is unavailable.
+
+### Changed
+
+- QR mode temporarily hides unrelated wireless controls so the code stays large, centered, and visible without scrolling.
+
 ## [0.1.8] - 2026-07-17
 
 ### Added

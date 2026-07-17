@@ -336,3 +336,29 @@ public static partial class AdbStatusParser
     [GeneratedRegex(@"mName=(?<name>[^,}]+)", RegexOptions.IgnoreCase)]
     private static partial Regex ThermalNameRegex();
 }
+
+public static class AdbMdnsParser
+{
+    public static IReadOnlyList<AdbMdnsService> Parse(string output)
+    {
+        var services = new List<AdbMdnsService>();
+        using var reader = new StringReader(output ?? string.Empty);
+        while (reader.ReadLine() is { } line)
+        {
+            string[] parts = line.Split(
+                (char[]?)null,
+                3,
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Length != 3 ||
+                !parts[1].StartsWith("_adb", StringComparison.Ordinal) ||
+                !parts[2].Contains(':', StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            services.Add(new AdbMdnsService(parts[0], parts[1], parts[2]));
+        }
+
+        return services;
+    }
+}

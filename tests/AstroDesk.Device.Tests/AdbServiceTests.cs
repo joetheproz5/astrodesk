@@ -92,6 +92,27 @@ public sealed class AdbServiceTests
             Assert.Single(runner.Invocations).Arguments);
     }
 
+    [Fact]
+    public async Task PairWirelessAsync_ExplainsProtocolFaultAsAnUnreachableTemporaryAddress()
+    {
+        var runner = new RecordingProcessRunner
+        {
+            RunResult = new ProcessExecutionResult(
+                1,
+                string.Empty,
+                "error: protocol fault (couldn't read status message): No error",
+                TimeSpan.Zero),
+        };
+        var service = CreateService(runner);
+
+        AdbCommandException exception = await Assert.ThrowsAsync<AdbCommandException>(
+            () => service.PairWirelessAsync("192.168.1.101:34941", "123456"));
+
+        Assert.Contains("phone did not answer", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("same Wi-Fi", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("123456", exception.Message, StringComparison.Ordinal);
+    }
+
     private static AdbService CreateService(RecordingProcessRunner runner) =>
         new(
             runner,

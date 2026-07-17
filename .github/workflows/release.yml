@@ -9,7 +9,7 @@ on:
       version:
         description: Version to package; it must match AstroDesk.App.csproj
         required: true
-        default: "0.1.8"
+        default: "0.1.9"
         type: string
 
 permissions:
@@ -117,7 +117,7 @@ jobs:
 
           New-Item -ItemType Directory -Force -Path $releaseDirectory, $packageDirectory | Out-Null
           Copy-Item -Path "artifacts/publish/win-x64/*" -Destination $packageDirectory -Recurse -Force
-          Copy-Item -LiteralPath "README.md", "LICENSE", "CHANGELOG.md" -Destination $packageDirectory -Force
+          Copy-Item -LiteralPath "README.md", "LICENSE", "CHANGELOG.md", "THIRD-PARTY-NOTICES.md" -Destination $packageDirectory -Force
 
           Compress-Archive -Path "$packageDirectory/*" -DestinationPath $archivePath -CompressionLevel Optimal -Force
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archivePath).Hash.ToLowerInvariant()
