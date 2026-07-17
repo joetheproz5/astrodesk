@@ -14,6 +14,12 @@ The project follows [Semantic Versioning](https://semver.org/) while pre-1.0 rel
 - A Windows Graphics Capture backend with Win32 fallback.
 - Signed installer packaging after a reproducible release process is established.
 
+## [0.1.11] - 2026-07-17
+
+### Fixed
+
+- Suppressed the scrcpy console window at process creation so connecting or starting the embedded preview no longer flashes or leaves a command window on the desktop.
+
 ## [0.1.10] - 2026-07-17
 
 ### Added

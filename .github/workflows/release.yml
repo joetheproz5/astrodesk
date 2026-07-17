@@ -9,7 +9,7 @@ on:
       version:
         description: Version to package; it must match AstroDesk.App.csproj
         required: true
-        default: "0.1.10"
+        default: "0.1.11"
         type: string
 
 permissions:

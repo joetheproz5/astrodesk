@@ -93,7 +93,7 @@ public sealed class ScrcpyService : IScrcpyService
                     arguments,
                     WorkingDirectory: Path.GetDirectoryName(executablePath),
                     SensitiveValues: sensitiveValues,
-                    CreateNoWindow: false,
+                    CreateNoWindow: true,
                     OutputReceived: RaiseLogReceived),
                 cancellationToken).ConfigureAwait(false);
 
