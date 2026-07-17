@@ -26,7 +26,7 @@ public sealed class ScrcpyServiceTests
         Assert.True(windows.Hidden);
 
         var invocation = Assert.IsType<ProcessInvocation>(runner.Invocation);
-        Assert.False(invocation.CreateNoWindow);
+        Assert.True(invocation.CreateNoWindow);
         Assert.Contains("--no-audio", invocation.Arguments);
         Assert.Contains("--stay-awake", invocation.Arguments);
         Assert.Contains("SECRET-SERIAL", invocation.SensitiveValues!);
