@@ -14,6 +14,16 @@ The project follows [Semantic Versioning](https://semver.org/) while pre-1.0 rel
 - A Windows Graphics Capture backend with Win32 fallback.
 - Signed installer packaging after a reproducible release process is established.
 
+## [0.1.6] - 2026-07-17
+
+### Changed
+
+- Added explicit one-finger drag scrolling with a movement threshold and inertial glide across AstroDesk's scrollable panels, including gestures that begin over nested controls.
+- Expanded the embedded scrcpy preview to the full shooting-workspace width by default.
+- Moved the detailed Night Brief and Session workspace into mutually exclusive, touch-friendly slide-out panels opened from menu buttons above the preview.
+- Kept the full live location, shooting recommendation, weather, Moon, and light-pollution rail pinned above the enlarged preview.
+- Verified the preview-first layout and both slide-out panels at the minimum 1050 x 700 window size with Windows display scaling.
+
 ## [0.1.5] - 2026-07-17
 
 ### Changed
