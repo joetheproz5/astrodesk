@@ -18,7 +18,8 @@ The project follows [Semantic Versioning](https://semver.org/) while pre-1.0 rel
 
 ### Changed
 
-- Made the embedded scrcpy phone display the visual focus of the shooting workspace and locked its portrait frame to the Galaxy S23 Ultra's 1440 x 3088 display ratio.
+- Made the embedded scrcpy phone display the visual focus of the shooting workspace and locked its landscape frame to the Galaxy S23 Ultra's 3088 x 1440 display ratio.
+- Added a visible Rotate phone control so the mirrored Android display can be aligned with the landscape workspace in one tap.
 - Replaced the ambiguous toolbar panel buttons with a permanently visible, clearly labeled sidebar control rail.
 - Compressed the pinned location, recommendation, weather, Moon, and light-pollution information into a single shallow strip to give the phone substantially more vertical space.
 - Floated preview status and framing controls beside the phone so they no longer consume rows above or below it.
