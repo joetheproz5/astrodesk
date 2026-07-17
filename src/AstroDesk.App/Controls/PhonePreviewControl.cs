@@ -556,10 +556,14 @@ public sealed class PhonePreviewControl : FrameworkElement
     private void DrawCenteredStatus(DrawingContext context, string text, Brush brush)
     {
         FormattedText formatted = CreateText(text, 14, brush);
+        formatted.MaxTextWidth = Math.Max(1, ActualWidth - 24);
+        formatted.MaxTextHeight = Math.Max(1, ActualHeight - 24);
+        formatted.TextAlignment = TextAlignment.Center;
+        formatted.Trimming = TextTrimming.CharacterEllipsis;
         context.DrawText(
             formatted,
             new Point(
-                Math.Max(12, (ActualWidth - formatted.Width) / 2),
+                12,
                 Math.Max(12, (ActualHeight - formatted.Height) / 2)));
     }
 
