@@ -41,6 +41,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private readonly IExposureTimerService _exposureTimer;
     private readonly IDeviceToolbarController _toolbar;
     private readonly IAdbInputService _adbInput;
+    private readonly IAdbWirelessClient _adbWireless;
     private readonly DeviceToolOptions _deviceToolOptions;
     private readonly DeviceMonitorOptions _deviceMonitorOptions;
     private readonly AstroDeskAppOptions _appOptions;
@@ -76,6 +77,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         IExposureTimerService exposureTimer,
         IDeviceToolbarController toolbar,
         IAdbInputService adbInput,
+        IAdbWirelessClient adbWireless,
         DeviceToolOptions deviceToolOptions,
         DeviceMonitorOptions deviceMonitorOptions,
         AstroDeskAppOptions appOptions,
@@ -94,6 +96,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _exposureTimer = exposureTimer;
         _toolbar = toolbar;
         _adbInput = adbInput;
+        _adbWireless = adbWireless;
         _deviceToolOptions = deviceToolOptions;
         _deviceMonitorOptions = deviceMonitorOptions;
         _appOptions = appOptions;
@@ -215,6 +218,21 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private string _usbStateText = "Unavailable";
 
     [ObservableProperty]
+    private string _wirelessEndpoint = string.Empty;
+
+    [ObservableProperty]
+    private string _wirelessPairingEndpoint = string.Empty;
+
+    [ObservableProperty]
+    private string _wirelessPairingCode = string.Empty;
+
+    [ObservableProperty]
+    private string _wirelessStatus = "Choose the one-tap USB switch or enter the address shown under Wireless debugging.";
+
+    [ObservableProperty]
+    private bool _isWirelessBusy;
+
+    [ObservableProperty]
     private ImageSource? _previewImage;
 
     [ObservableProperty]
@@ -324,6 +342,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     [ObservableProperty]
     private bool _showSessionDrawer;
+
+    [ObservableProperty]
+    private bool _showWirelessPanel;
 
     [ObservableProperty]
     private string _targetName = "Milky Way";
@@ -825,6 +846,167 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         {
             _logger.LogError(exception, "Could not reconnect scrcpy.");
             PreviewError = FriendlyToolError(exception, "scrcpy");
+        }
+    }
+
+    [RelayCommand]
+    private async Task SwitchUsbToWirelessAsync()
+    {
+        if (IsWirelessBusy)
+        {
+            return;
+        }
+
+        string? serial = SelectedAdbDevice?.Serial
+                         ?? _deviceMonitor.LastSnapshot?.Connection.SelectedDevice?.Serial;
+        if (string.IsNullOrWhiteSpace(serial) || serial.Contains(':', StringComparison.Ordinal))
+        {
+            WirelessStatus = "Connect and authorize the phone with USB first, then tap this button again.";
+            return;
+        }
+
+        IsWirelessBusy = true;
+        try
+        {
+            WirelessStatus = "Finding the phone on Wi-Fi…";
+            string address = await _adbWireless.GetWifiAddressAsync(
+                serial,
+                _lifetimeCancellation.Token).ConfigureAwait(true);
+            string endpoint = $"{address}:5555";
+
+            WirelessStatus = "Restarting ADB in wireless mode…";
+            await _adbWireless.EnableTcpIpAsync(
+                serial,
+                5555,
+                _lifetimeCancellation.Token).ConfigureAwait(true);
+            await Task.Delay(TimeSpan.FromSeconds(1), _lifetimeCancellation.Token).ConfigureAwait(true);
+            await _adbWireless.ConnectWirelessAsync(
+                endpoint,
+                _lifetimeCancellation.Token).ConfigureAwait(true);
+
+            WirelessEndpoint = endpoint;
+            _deviceMonitorOptions.PreferredSerial = endpoint;
+            SelectedAdbDevice = null;
+            _deviceMonitorOptions.PreferredSerial = endpoint;
+            await _deviceMonitor.PollOnceAsync(_lifetimeCancellation.Token).ConfigureAwait(true);
+            WirelessStatus = $"Connected wirelessly to {endpoint}. You can unplug USB now.";
+            StatusMessage = "Wireless ADB connected.";
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Could not switch ADB from USB to wireless.");
+            WirelessStatus = $"Wireless switch failed: {exception.Message}";
+        }
+        finally
+        {
+            IsWirelessBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ConnectWirelessAsync()
+    {
+        if (IsWirelessBusy)
+        {
+            return;
+        }
+
+        IsWirelessBusy = true;
+        try
+        {
+            string endpoint = NormalizeWirelessEndpoint(WirelessEndpoint, addDefaultPort: true);
+            WirelessStatus = $"Connecting to {endpoint}…";
+            await _adbWireless.ConnectWirelessAsync(
+                endpoint,
+                _lifetimeCancellation.Token).ConfigureAwait(true);
+            WirelessEndpoint = endpoint;
+            _deviceMonitorOptions.PreferredSerial = endpoint;
+            SelectedAdbDevice = null;
+            _deviceMonitorOptions.PreferredSerial = endpoint;
+            await _deviceMonitor.PollOnceAsync(_lifetimeCancellation.Token).ConfigureAwait(true);
+            WirelessStatus = $"Connected wirelessly to {endpoint}.";
+            StatusMessage = "Wireless ADB connected.";
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Could not connect wireless ADB.");
+            WirelessStatus = $"Wireless connection failed: {exception.Message}";
+        }
+        finally
+        {
+            IsWirelessBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task PairWirelessAsync()
+    {
+        if (IsWirelessBusy)
+        {
+            return;
+        }
+
+        IsWirelessBusy = true;
+        try
+        {
+            string endpoint = NormalizeWirelessEndpoint(WirelessPairingEndpoint, addDefaultPort: false);
+            string code = WirelessPairingCode.Trim();
+            if (code.Length != 6 || !code.All(char.IsDigit))
+            {
+                throw new InvalidOperationException("Enter the six-digit pairing code shown on the phone.");
+            }
+
+            WirelessStatus = $"Pairing with {endpoint}…";
+            await _adbWireless.PairWirelessAsync(
+                endpoint,
+                code,
+                _lifetimeCancellation.Token).ConfigureAwait(true);
+            WirelessPairingCode = string.Empty;
+            WirelessStatus = "Paired. Copy the separate IP address and port from the main Wireless debugging screen, then tap Connect.";
+            StatusMessage = "Wireless ADB pairing completed.";
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Could not pair wireless ADB.");
+            WirelessStatus = $"Pairing failed: {exception.Message}";
+        }
+        finally
+        {
+            IsWirelessBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task DisconnectWirelessAsync()
+    {
+        if (IsWirelessBusy)
+        {
+            return;
+        }
+
+        IsWirelessBusy = true;
+        try
+        {
+            string candidate = string.IsNullOrWhiteSpace(WirelessEndpoint)
+                ? SelectedAdbDevice?.Serial ?? string.Empty
+                : WirelessEndpoint;
+            string endpoint = NormalizeWirelessEndpoint(candidate, addDefaultPort: true);
+            await _adbWireless.DisconnectWirelessAsync(
+                endpoint,
+                _lifetimeCancellation.Token).ConfigureAwait(true);
+            _deviceMonitorOptions.PreferredSerial = null;
+            await _deviceMonitor.PollOnceAsync(_lifetimeCancellation.Token).ConfigureAwait(true);
+            WirelessStatus = $"Disconnected {endpoint}.";
+            StatusMessage = "Wireless ADB disconnected.";
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Could not disconnect wireless ADB.");
+            WirelessStatus = $"Disconnect failed: {exception.Message}";
+        }
+        finally
+        {
+            IsWirelessBusy = false;
         }
     }
 
@@ -1786,6 +1968,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         {
             ShowNightBriefDrawer = false;
             ShowSessionDrawer = false;
+            ShowWirelessPanel = false;
         }
     }
 
@@ -2509,6 +2692,27 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                abbreviation.Equals(timeZoneId, StringComparison.OrdinalIgnoreCase)
             ? timeZoneId
             : $"{timeZoneId} ({abbreviation})";
+    }
+
+    private static string NormalizeWirelessEndpoint(string endpoint, bool addDefaultPort)
+    {
+        string value = endpoint.Trim();
+        if (value.Length == 0)
+        {
+            throw new InvalidOperationException("Enter the phone's Wi-Fi IP address and port.");
+        }
+
+        if (!value.Contains(':', StringComparison.Ordinal))
+        {
+            if (!addDefaultPort)
+            {
+                throw new InvalidOperationException("Enter the pairing address exactly as shown on the phone, including its port.");
+            }
+
+            value += ":5555";
+        }
+
+        return value;
     }
 
     private void ValidateSessionInputs()

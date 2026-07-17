@@ -137,28 +137,28 @@ public partial class App : Application
             {
                 client.BaseAddress = new Uri("https://api.open-meteo.com/");
                 client.Timeout = TimeSpan.FromSeconds(12);
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("AstroDesk/0.1.7");
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("AstroDesk/0.1.8");
             });
         builder.Services.AddHttpClient<OpenMeteoLocationProvider>(
             client =>
             {
                 client.BaseAddress = new Uri("https://geocoding-api.open-meteo.com/");
                 client.Timeout = TimeSpan.FromSeconds(12);
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("AstroDesk/0.1.7");
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("AstroDesk/0.1.8");
             });
         builder.Services.AddHttpClient<BigDataCloudIpLocationProvider>(
             client =>
             {
                 client.BaseAddress = new Uri("https://api.bigdatacloud.net/");
                 client.Timeout = TimeSpan.FromSeconds(12);
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("AstroDesk/0.1.7");
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("AstroDesk/0.1.8");
             });
         builder.Services.AddHttpClient<DavidLorenzLightPollutionProvider>(
             client =>
             {
                 client.BaseAddress = new Uri("https://djlorenz.github.io/");
                 client.Timeout = TimeSpan.FromSeconds(20);
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("AstroDesk/0.1.7");
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("AstroDesk/0.1.8");
             });
         builder.Services.AddTransient<IWeatherProvider>(
             provider => provider.GetRequiredService<OpenMeteoWeatherProvider>());
@@ -187,6 +187,8 @@ public partial class App : Application
         builder.Services.AddSingleton<IAdbCommandExecutor>(
             provider => provider.GetRequiredService<AdbService>());
         builder.Services.AddSingleton<IAdbDeviceClient>(
+            provider => provider.GetRequiredService<AdbService>());
+        builder.Services.AddSingleton<IAdbWirelessClient>(
             provider => provider.GetRequiredService<AdbService>());
         builder.Services.AddSingleton<IAdbInputService, AdbInputService>();
         builder.Services.AddSingleton<IScrcpyWindowManager, Win32ScrcpyWindowManager>();

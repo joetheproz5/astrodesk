@@ -1,6 +1,9 @@
 using AstroDesk.Device.Processes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Net;
+using System.Net.Sockets;
+using System.Text.RegularExpressions;
 
 namespace AstroDesk.Device.Adb;
 
@@ -27,7 +30,32 @@ public interface IAdbDeviceClient
     Task ReconnectAsync(CancellationToken cancellationToken = default);
 }
 
-public sealed class AdbService : IAdbCommandExecutor, IAdbDeviceClient
+public interface IAdbWirelessClient
+{
+    Task<string> GetWifiAddressAsync(
+        string serial,
+        CancellationToken cancellationToken = default);
+
+    Task EnableTcpIpAsync(
+        string serial,
+        int port = 5555,
+        CancellationToken cancellationToken = default);
+
+    Task PairWirelessAsync(
+        string endpoint,
+        string pairingCode,
+        CancellationToken cancellationToken = default);
+
+    Task ConnectWirelessAsync(
+        string endpoint,
+        CancellationToken cancellationToken = default);
+
+    Task DisconnectWirelessAsync(
+        string endpoint,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed class AdbService : IAdbCommandExecutor, IAdbDeviceClient, IAdbWirelessClient
 {
     private readonly IProcessRunner _processRunner;
     private readonly IExecutableLocator _executableLocator;
@@ -275,6 +303,68 @@ public sealed class AdbService : IAdbCommandExecutor, IAdbDeviceClient
         EnsureSucceeded(result, "disconnect");
     }
 
+    public async Task<string> GetWifiAddressAsync(
+        string serial,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serial);
+        var result = await ExecuteAsync(
+            serial,
+            ["shell", "ip", "-f", "inet", "addr", "show", "wlan0"],
+            cancellationToken).ConfigureAwait(false);
+        EnsureSucceeded(result, "wifi-address", [serial]);
+
+        Match match = Regex.Match(
+            result.StandardOutput,
+            @"\binet\s+(?<address>(?:\d{1,3}\.){3}\d{1,3})/",
+            RegexOptions.CultureInvariant);
+        if (match.Success &&
+            IPAddress.TryParse(match.Groups["address"].Value, out IPAddress? address) &&
+            address.AddressFamily == AddressFamily.InterNetwork &&
+            !IPAddress.IsLoopback(address))
+        {
+            return address.ToString();
+        }
+
+        throw new InvalidOperationException(
+            "Could not find the phone's Wi-Fi address. Connect the laptop and phone to the same Wi-Fi network, then try again.");
+    }
+
+    public async Task EnableTcpIpAsync(
+        string serial,
+        int port = 5555,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serial);
+        if (port is < 1024 or > 65535)
+        {
+            throw new ArgumentOutOfRangeException(nameof(port), "The wireless ADB port must be between 1024 and 65535.");
+        }
+
+        var result = await ExecuteAsync(
+            serial,
+            ["tcpip", port.ToString(System.Globalization.CultureInfo.InvariantCulture)],
+            cancellationToken).ConfigureAwait(false);
+        EnsureSucceeded(result, "tcpip", [serial]);
+    }
+
+    public async Task PairWirelessAsync(
+        string endpoint,
+        string pairingCode,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
+        ArgumentException.ThrowIfNullOrWhiteSpace(pairingCode);
+
+        string safeEndpoint = endpoint.Trim();
+        string secret = pairingCode.Trim();
+        ProcessExecutionResult result = await ExecuteGlobalAsync(
+            ["pair", safeEndpoint, secret],
+            [safeEndpoint, secret],
+            cancellationToken).ConfigureAwait(false);
+        EnsureSucceeded(result, "pair", [safeEndpoint, secret]);
+    }
+
     public async Task<string> ResolveConnectedSerialAsync(
         string? preferredSerial = null,
         CancellationToken cancellationToken = default)
@@ -313,6 +403,22 @@ public sealed class AdbService : IAdbCommandExecutor, IAdbDeviceClient
 
     private static string? EmptyToNull(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private async Task<ProcessExecutionResult> ExecuteGlobalAsync(
+        IReadOnlyList<string> arguments,
+        IReadOnlyCollection<string> sensitiveValues,
+        CancellationToken cancellationToken)
+    {
+        var adbPath = _executableLocator.Resolve(
+            new ExecutableRequest("adb.exe", _options.AdbExecutablePath, "ASTRODESK_ADB_PATH"));
+        return await _processRunner.RunAsync(
+            new ProcessInvocation(
+                adbPath,
+                arguments,
+                SensitiveValues: sensitiveValues,
+                CreateNoWindow: true),
+            cancellationToken).ConfigureAwait(false);
+    }
 
     private static void EnsureSucceeded(
         ProcessExecutionResult result,
