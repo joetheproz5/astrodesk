@@ -166,12 +166,160 @@
                         <ColumnDefinition Width="0" />
                     </Grid.ColumnDefinitions>
 
+                    <Border Grid.ColumnSpan="5"
+                            Height="100"
+                            VerticalAlignment="Top"
+                            Style="{StaticResource PanelCard}"
+                            Padding="10">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1.25*" />
+                                <ColumnDefinition Width="10" />
+                                <ColumnDefinition Width="1.15*" />
+                                <ColumnDefinition Width="10" />
+                                <ColumnDefinition Width="2*" />
+                                <ColumnDefinition Width="10" />
+                                <ColumnDefinition Width="1.55*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0" Style="{StaticResource SubtleCard}" Padding="10">
+                                <StackPanel>
+                                    <DockPanel>
+                                        <TextBlock Text="LOCATION" Style="{StaticResource SectionTitle}" Margin="0" />
+                                        <Button DockPanel.Dock="Right"
+                                                Content="Locate"
+                                                Command="{Binding LocateCurrentUserCommand}"
+                                                Style="{StaticResource CompactButton}"
+                                                MinHeight="24"
+                                                Padding="7,2"
+                                                Margin="7,0,0,0" />
+                                    </DockPanel>
+                                    <TextBlock Text="{Binding LocationStatusText}"
+                                               FontSize="13.5"
+                                               FontWeight="SemiBold"
+                                               Margin="0,3,0,0"
+                                               TextWrapping="NoWrap"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding LocationStatusText}" />
+                                    <TextBlock Style="{StaticResource MutedText}"
+                                               FontSize="10.5"
+                                               Margin="0,2,0,0"
+                                               TextWrapping="NoWrap"
+                                               TextTrimming="CharacterEllipsis">
+                                        <Run Text="{Binding AltitudeText}" />
+                                        <Run Text=" · " />
+                                        <Run Text="{Binding TimeZoneText}" />
+                                    </TextBlock>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="2" Style="{StaticResource HeroCard}" Padding="10">
+                                <StackPanel>
+                                    <DockPanel LastChildFill="False">
+                                        <TextBlock Text="TONIGHT"
+                                                   Style="{StaticResource SectionTitle}"
+                                                   Foreground="{DynamicResource PrimaryTextBrush}"
+                                                   Margin="0" />
+                                        <TextBlock DockPanel.Dock="Right"
+                                                   Text="{Binding ShootingScoreText}"
+                                                   FontSize="15"
+                                                   FontWeight="SemiBold" />
+                                    </DockPanel>
+                                    <TextBlock Text="{Binding ShootingRecommendationText}"
+                                               FontSize="14"
+                                               FontWeight="SemiBold"
+                                               Margin="0,2,0,0"
+                                               TextWrapping="NoWrap"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Style="{StaticResource MutedText}"
+                                               FontSize="9.5"
+                                               Margin="0,1,0,0">
+                                        <Run Text="Best  " />
+                                        <Run Text="{Binding BestShootingWindowText}" FontWeight="SemiBold" />
+                                    </TextBlock>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="4" Style="{StaticResource SubtleCard}" Padding="10">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <DockPanel>
+                                        <TextBlock Text="WEATHER NOW" Style="{StaticResource SectionTitle}" Margin="0" />
+                                        <TextBlock DockPanel.Dock="Right"
+                                                   Text="{Binding ConditionsUpdatedText}"
+                                                   Style="{StaticResource MutedText}"
+                                                   FontSize="9.5"
+                                                   MaxWidth="100"
+                                                   TextWrapping="NoWrap"
+                                                   TextTrimming="CharacterEllipsis" />
+                                    </DockPanel>
+                                    <UniformGrid Grid.Row="1" Columns="4" Margin="0,3,0,0">
+                                        <StackPanel>
+                                            <TextBlock Text="Temp" Style="{StaticResource MutedText}" FontSize="9.5" />
+                                            <TextBlock Text="{Binding TemperatureText}" FontSize="13.5" FontWeight="SemiBold" TextWrapping="NoWrap" />
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="Clouds" Style="{StaticResource MutedText}" FontSize="9.5" />
+                                            <TextBlock Text="{Binding CloudCoverText}" FontSize="13.5" FontWeight="SemiBold" TextWrapping="NoWrap" />
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="Visibility" Style="{StaticResource MutedText}" FontSize="9.5" />
+                                            <TextBlock Text="{Binding VisibilityText}" FontSize="13.5" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="Wind" Style="{StaticResource MutedText}" FontSize="9.5" />
+                                            <TextBlock Text="{Binding WindText}" FontSize="13.5" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </UniformGrid>
+                                    <TextBlock Grid.Row="2" Style="{StaticResource MutedText}" FontSize="9.5">
+                                        <Run Text="Humidity " />
+                                        <Run Text="{Binding HumidityText}" FontWeight="SemiBold" />
+                                        <Run Text="  ·  Dew risk " />
+                                        <Run Text="{Binding DewRiskText}" FontWeight="SemiBold" />
+                                    </TextBlock>
+                                </Grid>
+                            </Border>
+
+                            <Border Grid.Column="6" Style="{StaticResource SubtleCard}" Padding="10">
+                                <StackPanel>
+                                    <DockPanel LastChildFill="False">
+                                        <TextBlock Text="MOON &amp; SKY" Style="{StaticResource SectionTitle}" Margin="0" />
+                                        <TextBlock DockPanel.Dock="Right"
+                                                   Text="{Binding MoonIlluminationText, StringFormat={}{0} lit}"
+                                                   Style="{StaticResource MutedText}"
+                                                   FontSize="10" />
+                                    </DockPanel>
+                                    <TextBlock Text="{Binding MoonPhaseText}"
+                                               FontSize="14"
+                                               FontWeight="SemiBold"
+                                               Margin="0,3,0,0"
+                                               TextWrapping="NoWrap"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Style="{StaticResource MutedText}"
+                                               FontSize="10.5"
+                                               Margin="0,2,0,0"
+                                               TextWrapping="NoWrap"
+                                               TextTrimming="CharacterEllipsis">
+                                        <Run Text="{Binding MoonPositionText}" />
+                                        <Run Text="  ·  " />
+                                        <Run Text="{Binding LightPollutionText}" />
+                                    </TextBlock>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Border>
+
                     <!-- Keep the conditions that drive a shooting decision permanently visible.
                          The longer location, twilight, and moon details remain available in the
                          Night brief below, but this rail never participates in vertical scrolling. -->
                     <Border Grid.ColumnSpan="5"
                             Height="148"
                             VerticalAlignment="Top"
+                            Visibility="Collapsed"
                             Style="{StaticResource PanelCard}"
                             Padding="12">
                         <Grid>
@@ -400,7 +548,7 @@
                             Visibility="{Binding ShowNightBriefDrawer, Converter={StaticResource BoolToVisibility}}"
                             Style="{StaticResource PanelCard}"
                             Padding="0"
-                            Margin="0,160,0,0">
+                            Margin="0,112,0,0">
                         <Grid>
                             <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                                           VerticalScrollBarVisibility="Auto"
@@ -963,12 +1111,12 @@
 
                     <Grid Grid.Column="0"
                           Grid.ColumnSpan="5"
-                          Margin="0,160,0,0">
+                          Margin="0,112,0,0">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="12" />
                             <RowDefinition Height="*" />
-                            <RowDefinition Height="12" />
+                            <RowDefinition Height="0" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
@@ -980,11 +1128,6 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <WrapPanel Grid.ColumnSpan="3">
-                                    <ToggleButton Content="&#x2630; Night details"
-                                                  IsChecked="{Binding ShowNightBriefDrawer, Mode=TwoWay}"
-                                                  Margin="0,0,10,0"
-                                                  Padding="13,8"
-                                                  ToolTip="Open location, twilight, weather, and Moon details" />
                                     <Button Content="Start preview"
                                             Command="{Binding StartPreviewCommand}"
                                             Style="{StaticResource AccentButton}"
@@ -1023,11 +1166,6 @@
                                             </ContextMenu>
                                         </Button.ContextMenu>
                                     </Button>
-                                    <ToggleButton Content="Session &#x2630;"
-                                                  IsChecked="{Binding ShowSessionDrawer, Mode=TwoWay}"
-                                                  Margin="14,0,0,0"
-                                                  Padding="13,8"
-                                                  ToolTip="Open session planning, progress, and timer" />
                                 </WrapPanel>
                                 <StackPanel VerticalAlignment="Center"
                                             Visibility="Collapsed">
@@ -1139,7 +1277,7 @@
                         </Border>
 
                         <Border Grid.Row="2"
-                                Background="{DynamicResource PreviewBackgroundBrush}"
+                                Background="{DynamicResource WindowBackgroundBrush}"
                                 BorderBrush="{DynamicResource PanelBorderBrush}"
                                 BorderThickness="1"
                                 CornerRadius="16"
@@ -1149,6 +1287,84 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
+
+                                <Border Grid.Column="0"
+                                        Panel.ZIndex="10"
+                                        Width="164"
+                                        HorizontalAlignment="Left"
+                                        VerticalAlignment="Center"
+                                        Margin="16"
+                                        Style="{StaticResource SubtleCard}"
+                                        Padding="12">
+                                    <StackPanel>
+                                        <TextBlock Text="SIDEBAR"
+                                                   Style="{StaticResource SectionTitle}"
+                                                   Margin="0,0,0,3" />
+                                        <TextBlock Text="Open a workspace"
+                                                   Style="{StaticResource MutedText}"
+                                                   FontSize="11"
+                                                   Margin="0,0,0,10" />
+                                        <ToggleButton Content="Night &amp; location"
+                                                      IsChecked="{Binding ShowNightBriefDrawer, Mode=TwoWay}"
+                                                      HorizontalContentAlignment="Left"
+                                                      Margin="0,0,0,7"
+                                                      ToolTip="Open weather, twilight, location, and Moon details" />
+                                        <ToggleButton Content="Session &amp; timer"
+                                                      IsChecked="{Binding ShowSessionDrawer, Mode=TwoWay}"
+                                                      HorizontalContentAlignment="Left"
+                                                      ToolTip="Open session planning, progress, and timer" />
+                                        <Border Style="{StaticResource SeparatorLine}"
+                                                Margin="0,10" />
+                                        <Button Content="Fullscreen phone"
+                                                Command="{Binding TogglePreviewFullscreenCommand}"
+                                                Style="{StaticResource ToolbarButton}"
+                                                HorizontalContentAlignment="Left" />
+                                        <TextBlock Text="Tap a panel again to close it."
+                                                   Style="{StaticResource MutedText}"
+                                                   FontSize="10.5"
+                                                   Margin="0,8,0,0" />
+                                    </StackPanel>
+                                </Border>
+
+                                <Border Grid.Column="0"
+                                        Panel.ZIndex="10"
+                                        Width="180"
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Center"
+                                        Margin="16"
+                                        Style="{StaticResource SubtleCard}"
+                                        Padding="12">
+                                    <StackPanel>
+                                        <TextBlock Text="PREVIEW STATUS"
+                                                   Style="{StaticResource SectionTitle}"
+                                                   Margin="0,0,0,7" />
+                                        <TextBlock Text="{Binding PreviewStatus}"
+                                                   FontWeight="SemiBold"
+                                                   TextWrapping="Wrap" />
+                                        <Border Style="{StaticResource SeparatorLine}"
+                                                Margin="0,10" />
+                                        <TextBlock Style="{StaticResource MutedText}">
+                                            <Run Text="{Binding PreviewFps, StringFormat={}{0:0.0} FPS}" />
+                                            <Run Text=" · " />
+                                            <Run Text="{Binding PreviewFrameSizeText}" />
+                                        </TextBlock>
+                                        <TextBlock Text="S23 Ultra · 1440 × 3088"
+                                                   Style="{StaticResource MutedText}"
+                                                   FontSize="10.5"
+                                                   Margin="0,5,0,0" />
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Galaxy S23 Ultra display: 1440 x 3088 pixels (19.3:9). -->
+                                <controls:AspectRatioDecorator Grid.Column="0"
+                                                               AspectRatio="0.4663212435"
+                                                               Margin="12">
+                                    <Border Background="{DynamicResource PreviewBackgroundBrush}"
+                                            BorderBrush="{DynamicResource AccentBrush}"
+                                            BorderThickness="2"
+                                            CornerRadius="24"
+                                            Padding="5"
+                                            ClipToBounds="True">
                                 <Grid>
                                     <controls:PhonePreviewControl x:Name="PhonePreview"
                                                                   Source="{Binding PreviewImage}"
@@ -1177,26 +1393,10 @@
                                                                   ScrcpyClientSize="{Binding ScrcpyClientSize}"
                                                                   PreviewInput="PhonePreview_OnPreviewInput" />
 
-                                    <StackPanel HorizontalAlignment="Left"
-                                                VerticalAlignment="Top"
-                                                Margin="12">
-                                        <Border Background="{DynamicResource PanelBackgroundBrush}" Opacity="0.92" CornerRadius="5" Padding="8,4" Margin="0,0,0,5">
-                                            <TextBlock Text="{Binding PreviewStatus}" FontSize="11" />
-                                        </Border>
-                                        <Border Background="{DynamicResource PanelBackgroundBrush}" Opacity="0.92" CornerRadius="5" Padding="8,4">
-                                            <TextBlock>
-                                                <Run Text="{Binding PreviewFps, StringFormat={}{0:0.0} FPS}" />
-                                                <Run Text=" · " />
-                                                <Run Text="{Binding PreviewFrameSizeText}" />
-                                            </TextBlock>
-                                        </Border>
-                                    </StackPanel>
-
                                     <controls:HistogramControl Histogram="{Binding Histogram}"
-                                                               Width="360"
-                                                               Height="150"
-                                                               Margin="14"
-                                                               HorizontalAlignment="Left"
+                                                               Height="90"
+                                                               Margin="8"
+                                                               HorizontalAlignment="Stretch"
                                                                VerticalAlignment="Bottom">
                                         <controls:HistogramControl.Style>
                                             <Style TargetType="controls:HistogramControl">
@@ -1213,6 +1413,8 @@
                                         </controls:HistogramControl.Style>
                                     </controls:HistogramControl>
                                 </Grid>
+                                    </Border>
+                                </controls:AspectRatioDecorator>
 
                                 <Border Grid.Column="1"
                                         Width="245"
@@ -1247,7 +1449,14 @@
                             </Grid>
                         </Border>
 
-                        <Border Grid.Row="4" Style="{StaticResource PanelCard}" Padding="10">
+                        <Border Grid.Row="2"
+                                Panel.ZIndex="10"
+                                Width="205"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Bottom"
+                                Margin="16"
+                                Style="{StaticResource PanelCard}"
+                                Padding="10">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
@@ -1434,7 +1643,7 @@
                             Visibility="{Binding ShowSessionDrawer, Converter={StaticResource BoolToVisibility}}"
                             Style="{StaticResource PanelCard}"
                             Padding="0"
-                            Margin="0,160,0,0">
+                            Margin="0,112,0,0">
                         <Grid>
                             <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                                           VerticalScrollBarVisibility="Auto"

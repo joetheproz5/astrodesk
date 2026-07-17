@@ -14,6 +14,17 @@ The project follows [Semantic Versioning](https://semver.org/) while pre-1.0 rel
 - A Windows Graphics Capture backend with Win32 fallback.
 - Signed installer packaging after a reproducible release process is established.
 
+## [0.1.7] - 2026-07-17
+
+### Changed
+
+- Made the embedded scrcpy phone display the visual focus of the shooting workspace and locked its portrait frame to the Galaxy S23 Ultra's 1440 x 3088 display ratio.
+- Replaced the ambiguous toolbar panel buttons with a permanently visible, clearly labeled sidebar control rail.
+- Compressed the pinned location, recommendation, weather, Moon, and light-pollution information into a single shallow strip to give the phone substantially more vertical space.
+- Floated preview status and framing controls beside the phone so they no longer consume rows above or below it.
+- Wrapped and trimmed empty-state and error text inside narrow phone previews instead of allowing it to overflow the device frame.
+- Verified the redesigned phone-first workspace and both sidebar controls at the minimum 1050 x 700 window size with Windows display scaling.
+
 ## [0.1.6] - 2026-07-17
 
 ### Changed
