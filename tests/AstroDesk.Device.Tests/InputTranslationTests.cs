@@ -143,8 +143,6 @@ public sealed class InputTranslationTests
                 clientPoint.Y + ScreenOffset.Y);
             return true;
         }
-
-        public bool TryFocus(nint windowHandle) => true;
     }
 
     private sealed class FakeClipboard : IClipboardBridge
