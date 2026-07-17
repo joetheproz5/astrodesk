@@ -14,6 +14,24 @@ The project follows [Semantic Versioning](https://semver.org/) while pre-1.0 rel
 - A Windows Graphics Capture backend with Win32 fallback.
 - Signed installer packaging after a reproducible release process is established.
 
+## [0.1.10] - 2026-07-17
+
+### Added
+
+- Added native Windows touch handling on the embedded phone preview, with reliable ADB tap and swipe forwarding over USB or wireless connections.
+- Added landscape-aware touch coordinate scaling for the S23 Ultra's 3088 × 1440 rotated display.
+
+### Fixed
+
+- Reset the shooting preview to the full uncropped phone frame whenever scrcpy starts.
+- Prevented one-finger phone interaction from being interpreted as workspace scrolling.
+- Prevented pointer presses inside AstroDesk from activating or exposing the hidden external scrcpy window.
+
+### Changed
+
+- Removed the 2× zoom button from the main shooting workspace.
+- Made the live phone preview slightly taller and wider while preserving its exact 3088 × 1440 landscape ratio and keeping live conditions visible.
+
 ## [0.1.9] - 2026-07-17
 
 ### Added

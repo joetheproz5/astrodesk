@@ -157,6 +157,7 @@ public sealed class PhonePreviewControl : FrameworkElement
         new FrameworkPropertyMetadata(default(Size), FrameworkPropertyMetadataOptions.AffectsRender));
 
     private Point _lastCursorPosition;
+    private TouchDevice? _activeTouchDevice;
 
     public PhonePreviewControl()
     {
@@ -167,6 +168,10 @@ public sealed class PhonePreviewControl : FrameworkElement
         MouseMove += HandleMouseMove;
         MouseUp += HandleMouseUp;
         MouseWheel += HandleMouseWheel;
+        TouchDown += HandleTouchDown;
+        TouchMove += HandleTouchMove;
+        TouchUp += HandleTouchUp;
+        LostTouchCapture += HandleLostTouchCapture;
         KeyDown += HandleKeyDown;
         TextInput += HandleTextInput;
     }
@@ -630,6 +635,70 @@ public sealed class PhonePreviewControl : FrameworkElement
             this,
             new PreviewInputEventArgs(PreviewInputKind.MouseWheel, position, wheelDelta: args.Delta));
         args.Handled = true;
+    }
+
+    private void HandleTouchDown(object? sender, TouchEventArgs args)
+    {
+        if (_activeTouchDevice is not null)
+        {
+            args.Handled = true;
+            return;
+        }
+
+        Focus();
+        _activeTouchDevice = args.TouchDevice;
+        Point position = args.GetTouchPoint(this).Position;
+        _lastCursorPosition = position;
+        _ = CaptureTouch(args.TouchDevice);
+        PreviewInput?.Invoke(this, new PreviewInputEventArgs(PreviewInputKind.TouchDown, position));
+        InvalidateVisual();
+        args.Handled = true;
+    }
+
+    private void HandleTouchMove(object? sender, TouchEventArgs args)
+    {
+        if (_activeTouchDevice != args.TouchDevice)
+        {
+            args.Handled = true;
+            return;
+        }
+
+        Point position = args.GetTouchPoint(this).Position;
+        _lastCursorPosition = position;
+        PreviewInput?.Invoke(this, new PreviewInputEventArgs(PreviewInputKind.TouchMove, position));
+        if (DebugOverlay)
+        {
+            InvalidateVisual();
+        }
+
+        args.Handled = true;
+    }
+
+    private void HandleTouchUp(object? sender, TouchEventArgs args)
+    {
+        if (_activeTouchDevice != args.TouchDevice)
+        {
+            args.Handled = true;
+            return;
+        }
+
+        Point position = args.GetTouchPoint(this).Position;
+        _lastCursorPosition = position;
+        PreviewInput?.Invoke(this, new PreviewInputEventArgs(PreviewInputKind.TouchUp, position));
+        _activeTouchDevice = null;
+        ReleaseTouchCapture(args.TouchDevice);
+        args.Handled = true;
+    }
+
+    private void HandleLostTouchCapture(object? sender, TouchEventArgs args)
+    {
+        if (_activeTouchDevice != args.TouchDevice)
+        {
+            return;
+        }
+
+        _activeTouchDevice = null;
+        PreviewInput?.Invoke(this, new PreviewInputEventArgs(PreviewInputKind.TouchUp, _lastCursorPosition));
     }
 
     private void HandleKeyDown(object sender, KeyEventArgs args)

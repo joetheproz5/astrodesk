@@ -8,8 +8,6 @@ public interface IWindowMessageSink
     bool Post(nint windowHandle, TranslatedInputMessage message);
 
     bool TryClientToScreen(nint windowHandle, MappedPoint clientPoint, out MappedPoint screenPoint);
-
-    bool TryFocus(nint windowHandle);
 }
 
 public sealed class NativeWindowMessageSink : IWindowMessageSink
@@ -26,9 +24,6 @@ public sealed class NativeWindowMessageSink : IWindowMessageSink
         return succeeded;
     }
 
-    public bool TryFocus(nint windowHandle) =>
-        windowHandle != nint.Zero && SetForegroundWindow(windowHandle);
-
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool PostMessageW(nint windowHandle, uint message, nuint wParam, nint lParam);
@@ -36,10 +31,6 @@ public sealed class NativeWindowMessageSink : IWindowMessageSink
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool ClientToScreen(nint windowHandle, ref NativePoint point);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetForegroundWindow(nint windowHandle);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativePoint
@@ -159,8 +150,7 @@ public interface IInputForwarder
 }
 
 /// <summary>
-/// Posts already-mapped input directly to the hidden scrcpy client window.
-/// Mouse-down focuses the target so subsequent physical keyboard input follows it.
+/// Posts already-mapped input directly to the hidden scrcpy client window without activating it.
 /// </summary>
 public sealed class Win32InputForwarder : IInputForwarder
 {
@@ -177,11 +167,6 @@ public sealed class Win32InputForwarder : IInputForwarder
 
     public bool ForwardPointer(nint windowHandle, PointerInput input)
     {
-        if (input.Action == PointerAction.LeftButtonDown)
-        {
-            _ = _messageSink.TryFocus(windowHandle);
-        }
-
         var message = InputMessageTranslator.Translate(input);
         if (message.UsesScreenCoordinates)
         {

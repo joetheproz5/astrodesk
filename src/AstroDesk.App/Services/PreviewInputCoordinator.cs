@@ -35,6 +35,9 @@ public sealed class PreviewInputCoordinator(
     private bool _leftDown;
     private bool _rightDown;
     private bool _directFailed;
+    private MappedPoint? _touchStart;
+    private MappedPoint? _touchLast;
+    private DateTimeOffset _touchStartedAt;
 
     public async Task HandleAsync(
         PreviewInputEventArgs input,
@@ -47,9 +50,17 @@ public sealed class PreviewInputCoordinator(
             new PointD(input.Position.X, input.Position.Y),
             context);
 
-        if (!mapping.IsInsidePreview && input.Kind is not (PreviewInputKind.KeyDown or PreviewInputKind.TextInput))
+        if (!mapping.IsInsidePreview)
         {
-            return;
+            if (input.Kind == PreviewInputKind.TouchUp)
+            {
+                await FinishTouchAsync(serial, _touchLast, context, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            if (input.Kind is not (PreviewInputKind.KeyDown or PreviewInputKind.TextInput))
+            {
+                return;
+            }
         }
 
         MappedPoint point = new(
@@ -74,6 +85,21 @@ public sealed class PreviewInputCoordinator(
                         cancellationToken)
                     .ConfigureAwait(false);
                 break;
+            case PreviewInputKind.TouchDown:
+                _touchStart = point;
+                _touchLast = point;
+                _touchStartedAt = DateTimeOffset.UtcNow;
+                break;
+            case PreviewInputKind.TouchMove:
+                if (_touchStart is not null)
+                {
+                    _touchLast = point;
+                }
+
+                break;
+            case PreviewInputKind.TouchUp:
+                await FinishTouchAsync(serial, point, context, cancellationToken).ConfigureAwait(false);
+                break;
             case PreviewInputKind.MouseWheel:
                 _ = _directInput.ForwardPointer(
                     window,
@@ -97,6 +123,46 @@ public sealed class PreviewInputCoordinator(
 
                 break;
         }
+    }
+
+    private async Task FinishTouchAsync(
+        string? serial,
+        MappedPoint? end,
+        CoordinateMappingContext context,
+        CancellationToken cancellationToken)
+    {
+        MappedPoint? start = _touchStart;
+        _touchStart = null;
+        _touchLast = null;
+        if (string.IsNullOrWhiteSpace(serial) || start is null || end is null)
+        {
+            return;
+        }
+
+        MappedPoint adbStart = ScaleForAdb(start.Value, context);
+        MappedPoint adbEnd = ScaleForAdb(end.Value, context);
+        double distance = Math.Sqrt(
+            Math.Pow(end.Value.X - start.Value.X, 2) +
+            Math.Pow(end.Value.Y - start.Value.Y, 2));
+        if (distance < 5)
+        {
+            await _adbInput.TapAsync(serial, adbEnd.X, adbEnd.Y, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        double durationMilliseconds = Math.Clamp(
+            (DateTimeOffset.UtcNow - _touchStartedAt).TotalMilliseconds,
+            0,
+            TimeSpan.FromMinutes(1).TotalMilliseconds);
+        TimeSpan duration = TimeSpan.FromMilliseconds(durationMilliseconds);
+        await _adbInput.SwipeAsync(
+            serial,
+            adbStart.X,
+            adbStart.Y,
+            adbEnd.X,
+            adbEnd.Y,
+            duration,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private Task HandleMouseDownAsync(nint window, MouseButton? button, MappedPoint point)
@@ -304,10 +370,18 @@ public sealed class PreviewInputCoordinator(
 
     private MappedPoint ScaleForAdb(MappedPoint clientPoint, CoordinateMappingContext context)
     {
-        ScreenResolution? resolution = _deviceMonitor.LastSnapshot?.PhoneStatus?.ScreenResolution;
+        PhoneStatus? status = _deviceMonitor.LastSnapshot?.PhoneStatus;
+        ScreenResolution? resolution = status?.ScreenResolution;
         if (resolution is null)
         {
             return clientPoint;
+        }
+
+        bool streamIsLandscape = context.ScrcpyClientSizePixels.Width >= context.ScrcpyClientSizePixels.Height;
+        bool resolutionIsLandscape = resolution.Value.Width >= resolution.Value.Height;
+        if (streamIsLandscape != resolutionIsLandscape)
+        {
+            resolution = new ScreenResolution(resolution.Value.Height, resolution.Value.Width);
         }
 
         double sourceWidth = Math.Max(1, context.ScrcpyClientSizePixels.Width - 1);

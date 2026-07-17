@@ -168,10 +168,10 @@
                               Width="{Binding ActualWidth, ElementName=CleanDashboardHost}"
                               Height="{Binding ViewportHeight, ElementName=CleanDashboardScroll}">
                             <Grid.RowDefinitions>
-                                <RowDefinition Height="132" />
-                                <RowDefinition Height="12" />
+                                <RowDefinition Height="116" />
+                                <RowDefinition Height="8" />
                                 <RowDefinition Height="Auto" />
-                                <RowDefinition Height="12" />
+                                <RowDefinition Height="8" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
 
@@ -359,10 +359,10 @@
                                 </DockPanel>
                             </Border>
 
-                            <Grid Grid.Row="4" Margin="18,0,18,18">
+                            <Grid Grid.Row="4" Margin="12,0,12,12">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="112" />
-                                    <ColumnDefinition Width="12" />
+                                    <ColumnDefinition Width="104" />
+                                    <ColumnDefinition Width="10" />
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
 
@@ -383,11 +383,6 @@
                                                       IsChecked="{Binding FocusMagnifier}"
                                                       HorizontalContentAlignment="Left"
                                                       Margin="0,0,0,6" />
-                                        <Button Content="2× zoom"
-                                                Command="{Binding Zoom2Command}"
-                                                Style="{StaticResource ToolbarButton}"
-                                                HorizontalContentAlignment="Left"
-                                                Margin="0,0,0,6" />
                                         <Button Content="Clear"
                                                 Command="{Binding HideAllOverlaysCommand}"
                                                 Style="{StaticResource ToolbarButton}"
@@ -405,7 +400,7 @@
                                         BorderBrush="{DynamicResource PanelBorderBrush}"
                                         BorderThickness="1"
                                         CornerRadius="18"
-                                        Padding="8"
+                                        Padding="5"
                                         ClipToBounds="True">
                                     <controls:AspectRatioDecorator AspectRatio="2.1444444444">
                                         <Border Background="{DynamicResource PreviewBackgroundBrush}"
@@ -428,7 +423,7 @@
                                                                           OverlayBrush="{Binding OverlayBrush}"
                                                                           OverlayOpacity="{Binding OverlayOpacity}"
                                                                           OverlayThickness="{Binding OverlayThickness}"
-                                                                          ZoomScale="{Binding PreviewZoom}"
+                                                                          ZoomScale="1"
                                                                           ZoomCenter="{Binding ZoomCenter}"
                                                                           FocusMagnifier="{Binding FocusMagnifier}"
                                                                           IsFrozen="{Binding IsPreviewFrozen}"

@@ -797,6 +797,8 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     {
         try
         {
+            PreviewZoom = 1;
+            ZoomCenter = new Point(0.5, 0.5);
             PreviewError = null;
             DeviceMonitorSnapshot? monitor = _deviceMonitor.LastSnapshot;
             if (monitor?.Connection.State == AdbConnectionState.MultipleDevices &&
