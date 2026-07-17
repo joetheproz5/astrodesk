@@ -14,6 +14,15 @@ The project follows [Semantic Versioning](https://semver.org/) while pre-1.0 rel
 - A Windows Graphics Capture backend with Win32 fallback.
 - Signed installer packaging after a reproducible release process is established.
 
+## [0.1.5] - 2026-07-17
+
+### Changed
+
+- Added a pinned conditions rail above the shooting workspace so the current location, altitude, automatic time zone, shooting score, recommendation, and best window remain visible without scrolling.
+- Kept live temperature, cloud cover, visibility, rain chance, humidity, wind, dew point, and dew risk together in the always-visible weather card.
+- Kept Moon phase, illumination, current position, light-pollution zone, and dark-sky window visible beside the weather card.
+- Verified the layout at AstroDesk's minimum 1050 x 700 window size and common Windows display scaling.
+
 ## [0.1.4] - 2026-07-16
 
 ### Changed

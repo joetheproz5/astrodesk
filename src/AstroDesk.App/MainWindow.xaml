@@ -166,7 +166,236 @@
                         <ColumnDefinition Width="360" />
                     </Grid.ColumnDefinitions>
 
-                    <Border Grid.Column="0" Style="{StaticResource PanelCard}" Padding="0">
+                    <!-- Keep the conditions that drive a shooting decision permanently visible.
+                         The longer location, twilight, and moon details remain available in the
+                         Night brief below, but this rail never participates in vertical scrolling. -->
+                    <Border Grid.ColumnSpan="5"
+                            Height="148"
+                            VerticalAlignment="Top"
+                            Style="{StaticResource PanelCard}"
+                            Padding="12">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1.18*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="1.18*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="2*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="1.55*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0"
+                                    Style="{StaticResource SubtleCard}"
+                                    Padding="12">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <DockPanel Margin="0,0,0,6">
+                                        <TextBlock Text="LOCATION"
+                                                   Style="{StaticResource SectionTitle}"
+                                                   Margin="0"
+                                                   VerticalAlignment="Center" />
+                                        <Button DockPanel.Dock="Right"
+                                                Content="Locate"
+                                                Command="{Binding LocateCurrentUserCommand}"
+                                                Style="{StaticResource CompactButton}"
+                                                MinHeight="28"
+                                                Padding="8,3"
+                                                Margin="8,0,0,0" />
+                                    </DockPanel>
+                                    <StackPanel Grid.Row="1">
+                                        <TextBlock Text="{Binding LocationStatusText}"
+                                                   FontSize="15"
+                                                   FontWeight="SemiBold"
+                                                   TextWrapping="NoWrap"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding LocationStatusText}" />
+                                        <TextBlock Text="{Binding LocationCoordinateText}"
+                                                   Style="{StaticResource MutedText}"
+                                                   FontSize="11.5"
+                                                   Margin="0,2,0,0"
+                                                   TextWrapping="NoWrap"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Style="{StaticResource MutedText}"
+                                                   FontSize="11.5"
+                                                   Margin="0,2,0,0"
+                                                   ToolTip="{Binding TimeZoneText}"
+                                                   TextWrapping="NoWrap"
+                                                   TextTrimming="CharacterEllipsis">
+                                            <Run Text="{Binding AltitudeText}" />
+                                            <Run Text="  /  " />
+                                            <Run Text="{Binding TimeZoneText}" />
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <Border Grid.Column="2"
+                                    Style="{StaticResource HeroCard}"
+                                    Padding="12">
+                                <StackPanel>
+                                    <DockPanel>
+                                        <TextBlock Text="TONIGHT"
+                                                   Style="{StaticResource SectionTitle}"
+                                                   Foreground="{DynamicResource PrimaryTextBrush}"
+                                                   Margin="0" />
+                                        <TextBlock DockPanel.Dock="Right"
+                                                   Text="{Binding ShootingScoreText}"
+                                                   FontSize="17"
+                                                   FontWeight="SemiBold"
+                                                   Margin="8,0,0,0" />
+                                    </DockPanel>
+                                    <TextBlock Text="{Binding ShootingRecommendationText}"
+                                               FontSize="16"
+                                               FontWeight="SemiBold"
+                                               Margin="0,7,0,0"
+                                               TextWrapping="NoWrap"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding ShootingRecommendationText}" />
+                                    <DockPanel Margin="0,7,0,0">
+                                        <TextBlock Text="Best window"
+                                                   Style="{StaticResource MutedText}"
+                                                   FontSize="11.5" />
+                                        <TextBlock DockPanel.Dock="Right"
+                                                   Text="{Binding BestShootingWindowText}"
+                                                   FontSize="12"
+                                                   FontWeight="SemiBold"
+                                                   Margin="8,0,0,0"
+                                                   TextWrapping="NoWrap"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding BestShootingWindowText}" />
+                                    </DockPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="4"
+                                    Style="{StaticResource SubtleCard}"
+                                    Padding="12">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <DockPanel Margin="0,0,0,5">
+                                        <TextBlock Text="WEATHER NOW"
+                                                   Style="{StaticResource SectionTitle}"
+                                                   Margin="0" />
+                                        <TextBlock DockPanel.Dock="Right"
+                                                   Text="{Binding ConditionsUpdatedText}"
+                                                   Style="{StaticResource MutedText}"
+                                                   FontSize="10.5"
+                                                   Margin="8,0,0,0"
+                                                   MaxWidth="112"
+                                                   TextWrapping="NoWrap"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding ConditionsUpdatedText}" />
+                                    </DockPanel>
+                                    <UniformGrid Grid.Row="1" Columns="3" Rows="2">
+                                        <StackPanel>
+                                            <TextBlock Text="Temperature" Style="{StaticResource MutedText}" FontSize="10.5" />
+                                            <TextBlock Text="{Binding TemperatureText}" FontSize="14" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="Clouds" Style="{StaticResource MutedText}" FontSize="10.5" />
+                                            <TextBlock Text="{Binding CloudCoverText}" FontSize="14" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="Visibility" Style="{StaticResource MutedText}" FontSize="10.5" />
+                                            <TextBlock Text="{Binding VisibilityText}" FontSize="14" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="Rain" Style="{StaticResource MutedText}" FontSize="10.5" />
+                                            <TextBlock Text="{Binding PrecipitationText}" FontSize="14" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="Humidity" Style="{StaticResource MutedText}" FontSize="10.5" />
+                                            <TextBlock Text="{Binding HumidityText}" FontSize="14" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="Wind" Style="{StaticResource MutedText}" FontSize="10.5" />
+                                            <TextBlock Text="{Binding WindText}" FontSize="14" FontWeight="SemiBold" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </UniformGrid>
+                                    <DockPanel Grid.Row="2" Margin="0,3,0,0">
+                                        <TextBlock Style="{StaticResource MutedText}" FontSize="10.5">
+                                            <Run Text="Dew point  " />
+                                            <Run Text="{Binding DewPointText}" FontWeight="SemiBold" />
+                                        </TextBlock>
+                                        <TextBlock DockPanel.Dock="Right"
+                                                   Style="{StaticResource MutedText}"
+                                                   FontSize="10.5"
+                                                   Margin="10,0,0,0">
+                                            <Run Text="Risk  " />
+                                            <Run Text="{Binding DewRiskText}" FontWeight="SemiBold" />
+                                        </TextBlock>
+                                    </DockPanel>
+                                </Grid>
+                            </Border>
+
+                            <Border Grid.Column="6"
+                                    Style="{StaticResource SubtleCard}"
+                                    Padding="12">
+                                <StackPanel>
+                                    <DockPanel>
+                                        <TextBlock Text="MOON &amp; SKY"
+                                                   Style="{StaticResource SectionTitle}"
+                                                   Margin="0" />
+                                        <TextBlock DockPanel.Dock="Right"
+                                                   Text="{Binding MoonIlluminationText, StringFormat={}{0} lit}"
+                                                   Style="{StaticResource MutedText}"
+                                                   FontSize="11"
+                                                   Margin="8,0,0,0" />
+                                    </DockPanel>
+                                    <TextBlock Text="{Binding MoonPhaseText}"
+                                               FontSize="15"
+                                               FontWeight="SemiBold"
+                                               Margin="0,5,0,0"
+                                               TextWrapping="NoWrap"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding MoonPositionText}"
+                                               Style="{StaticResource MutedText}"
+                                               FontSize="11.5"
+                                               Margin="0,2,0,0"
+                                               TextWrapping="NoWrap"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding MoonPositionText}" />
+                                    <DockPanel Margin="0,5,0,0">
+                                        <TextBlock Text="Light pollution" Style="{StaticResource MutedText}" FontSize="11" />
+                                        <TextBlock DockPanel.Dock="Right"
+                                                   Text="{Binding LightPollutionText}"
+                                                   FontSize="10.5"
+                                                   FontWeight="SemiBold"
+                                                   Margin="8,0,0,0"
+                                                   MaxWidth="125"
+                                                   TextWrapping="NoWrap"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding LightPollutionText}" />
+                                    </DockPanel>
+                                    <DockPanel Margin="0,2,0,0">
+                                        <TextBlock Text="Dark window" Style="{StaticResource MutedText}" FontSize="11" />
+                                        <TextBlock DockPanel.Dock="Right"
+                                                   Text="{Binding DarkSkyWindowText}"
+                                                   FontSize="11.5"
+                                                   FontWeight="SemiBold"
+                                                   Margin="8,0,0,0"
+                                                   MaxWidth="110"
+                                                   TextWrapping="NoWrap"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding DarkSkyWindowText}" />
+                                    </DockPanel>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Border>
+
+                    <Border Grid.Column="0"
+                            Style="{StaticResource PanelCard}"
+                            Padding="0"
+                            Margin="0,160,0,0">
                         <Grid>
                             <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                                           VerticalScrollBarVisibility="Auto"
@@ -721,7 +950,7 @@
                         </Grid>
                     </Border>
 
-                    <Grid Grid.Column="2">
+                    <Grid Grid.Column="2" Margin="0,160,0,0">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="12" />
@@ -1174,7 +1403,10 @@
                         </Border>
                     </Grid>
 
-                    <Border Grid.Column="4" Style="{StaticResource PanelCard}" Padding="0">
+                    <Border Grid.Column="4"
+                            Style="{StaticResource PanelCard}"
+                            Padding="0"
+                            Margin="0,160,0,0">
                         <Grid>
                             <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                                           VerticalScrollBarVisibility="Auto"
