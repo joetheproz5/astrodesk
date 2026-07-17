@@ -1140,6 +1140,11 @@
                                             Command="{Binding HomeCommand}"
                                             Style="{StaticResource ToolbarButton}"
                                             Margin="0,0,6,0" />
+                                    <Button Content="Rotate phone"
+                                            Command="{Binding RotatePhoneCommand}"
+                                            Style="{StaticResource ToolbarButton}"
+                                            Margin="0,0,6,0"
+                                            ToolTip="Rotate the mirrored phone into the landscape frame" />
                                     <Button Content="Screenshot"
                                             Command="{Binding TakeScreenshotCommand}"
                                             Style="{StaticResource ToolbarButton}"
@@ -1348,16 +1353,16 @@
                                             <Run Text=" · " />
                                             <Run Text="{Binding PreviewFrameSizeText}" />
                                         </TextBlock>
-                                        <TextBlock Text="S23 Ultra · 1440 × 3088"
+                                        <TextBlock Text="S23 Ultra landscape · 3088 × 1440"
                                                    Style="{StaticResource MutedText}"
                                                    FontSize="10.5"
                                                    Margin="0,5,0,0" />
                                     </StackPanel>
                                 </Border>
 
-                                <!-- Galaxy S23 Ultra display: 1440 x 3088 pixels (19.3:9). -->
+                                <!-- Galaxy S23 Ultra display in landscape: 3088 x 1440 pixels (19.3:9). -->
                                 <controls:AspectRatioDecorator Grid.Column="0"
-                                                               AspectRatio="0.4663212435"
+                                                               AspectRatio="2.1444444444"
                                                                Margin="12">
                                     <Border Background="{DynamicResource PreviewBackgroundBrush}"
                                             BorderBrush="{DynamicResource AccentBrush}"
