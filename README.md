@@ -5,7 +5,7 @@ AstroDesk is a Windows 11 shooting companion for phone-based astrophotography. I
 AstroDesk keeps the practical shooting workflow in one dark, local-first desktop application:
 
 - an embedded phone preview with mouse and keyboard input forwarding;
-- a preview-first, touch-friendly field interface with a compact Night Brief and focused session tabs;
+- a preview-first, touch-friendly field interface with mobile-style drag scrolling, pinned live conditions, and slide-out Night Brief and Session panels;
 - ADB connection and phone-status monitoring;
 - shooting-session, frame-count, exposure, notes, and history tools;
 - non-destructive framing overlays, zoom, preview screenshots, and histograms;

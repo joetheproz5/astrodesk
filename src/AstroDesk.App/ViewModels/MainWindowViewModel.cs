@@ -320,6 +320,12 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private bool _isPreviewFullscreen;
 
     [ObservableProperty]
+    private bool _showNightBriefDrawer;
+
+    [ObservableProperty]
+    private bool _showSessionDrawer;
+
+    [ObservableProperty]
     private string _targetName = "Milky Way";
 
     [ObservableProperty]
@@ -1756,6 +1762,31 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(IsDashboard));
         OnPropertyChanged(nameof(IsHistory));
         OnPropertyChanged(nameof(IsSettings));
+    }
+
+    partial void OnShowNightBriefDrawerChanged(bool value)
+    {
+        if (value)
+        {
+            ShowSessionDrawer = false;
+        }
+    }
+
+    partial void OnShowSessionDrawerChanged(bool value)
+    {
+        if (value)
+        {
+            ShowNightBriefDrawer = false;
+        }
+    }
+
+    partial void OnIsPreviewFullscreenChanged(bool value)
+    {
+        if (value)
+        {
+            ShowNightBriefDrawer = false;
+            ShowSessionDrawer = false;
+        }
     }
 
     partial void OnSelectedSessionTypeChanged(SessionType value) =>
