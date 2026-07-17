@@ -14,6 +14,22 @@ The project follows [Semantic Versioning](https://semver.org/) while pre-1.0 rel
 - A Windows Graphics Capture backend with Win32 fallback.
 - Signed installer packaging after a reproducible release process is established.
 
+## [0.1.8] - 2026-07-17
+
+### Added
+
+- Added a one-tap USB-to-wireless ADB switch that discovers the phone's Wi-Fi address, enables TCP/IP mode, connects, and selects the wireless device automatically.
+- Added direct Wireless ADB pairing, connect, and disconnect controls with pairing-code redaction and clear Android setup guidance.
+
+### Changed
+
+- Rebuilt the Shoot page as one clean, touch-scrollable surface without the permanent sidebar or duplicate tool rows.
+- Gave Weather Now a wide five-metric layout and kept Moon illumination, light pollution, altitude, dew point, and dew risk in the essential conditions strip.
+- Moved Grid, Crosshair, Focus, zoom, clear, and fullscreen controls into a narrow rail beside the landscape phone preview.
+- Replaced the blue-heavy theme with a neutral graphite and teal field palette and removed duplicate device status pills.
+- Reduced the minimum window size to 820 x 500 while retaining touch scrolling for smaller laptop viewports.
+- Excluded the embedded phone surface from workspace scrolling so Android touch input and page swipes do not conflict.
+
 ## [0.1.7] - 2026-07-17
 
 ### Changed

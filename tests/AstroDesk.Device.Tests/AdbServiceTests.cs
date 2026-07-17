@@ -44,6 +44,54 @@ public sealed class AdbServiceTests
         Assert.Contains("SECRET-SERIAL", invocation.SensitiveValues!);
     }
 
+    [Fact]
+    public async Task PairWirelessAsync_UsesArgumentListAndRedactsPairingDetails()
+    {
+        var runner = new RecordingProcessRunner();
+        var service = CreateService(runner);
+
+        await service.PairWirelessAsync("192.168.1.42:37121", "846219");
+
+        ProcessInvocation invocation = Assert.Single(runner.Invocations);
+        Assert.Equal(["pair", "192.168.1.42:37121", "846219"], invocation.Arguments);
+        Assert.Contains("192.168.1.42:37121", invocation.SensitiveValues!);
+        Assert.Contains("846219", invocation.SensitiveValues!);
+    }
+
+    [Fact]
+    public async Task GetWifiAddressAsync_ParsesWlanAddress()
+    {
+        var runner = new RecordingProcessRunner
+        {
+            RunResult = new ProcessExecutionResult(
+                0,
+                "12: wlan0 inet 192.168.1.42/24 brd 192.168.1.255 scope global wlan0",
+                string.Empty,
+                TimeSpan.Zero),
+        };
+        var service = CreateService(runner);
+
+        string address = await service.GetWifiAddressAsync("USB-SERIAL");
+
+        Assert.Equal("192.168.1.42", address);
+        Assert.Equal(
+            ["-s", "USB-SERIAL", "shell", "ip", "-f", "inet", "addr", "show", "wlan0"],
+            Assert.Single(runner.Invocations).Arguments);
+    }
+
+    [Fact]
+    public async Task EnableTcpIpAsync_UsesRequestedPort()
+    {
+        var runner = new RecordingProcessRunner();
+        var service = CreateService(runner);
+
+        await service.EnableTcpIpAsync("USB-SERIAL", 5555);
+
+        Assert.Equal(
+            ["-s", "USB-SERIAL", "tcpip", "5555"],
+            Assert.Single(runner.Invocations).Arguments);
+    }
+
     private static AdbService CreateService(RecordingProcessRunner runner) =>
         new(
             runner,

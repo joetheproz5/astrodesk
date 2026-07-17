@@ -26,11 +26,23 @@ public static class TouchScrollBehavior
         typeof(TouchScrollBehavior),
         new PropertyMetadata(false, HandleIsEnabledChanged));
 
+    public static readonly DependencyProperty IsExcludedProperty = DependencyProperty.RegisterAttached(
+        "IsExcluded",
+        typeof(bool),
+        typeof(TouchScrollBehavior),
+        new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.Inherits));
+
     public static bool GetIsEnabled(DependencyObject element) =>
         (bool)element.GetValue(IsEnabledProperty);
 
     public static void SetIsEnabled(DependencyObject element, bool value) =>
         element.SetValue(IsEnabledProperty, value);
+
+    public static bool GetIsExcluded(DependencyObject element) =>
+        (bool)element.GetValue(IsExcludedProperty);
+
+    public static void SetIsExcluded(DependencyObject element, bool value) =>
+        element.SetValue(IsExcludedProperty, value);
 
     private static void HandleIsEnabledChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs args)
     {
@@ -92,6 +104,11 @@ public static class TouchScrollBehavior
     private static void HandlePreviewTouchDown(object? sender, TouchEventArgs args)
     {
         if (sender is not ScrollViewer scrollViewer)
+        {
+            return;
+        }
+
+        if (args.OriginalSource is DependencyObject source && GetIsExcluded(source))
         {
             return;
         }
