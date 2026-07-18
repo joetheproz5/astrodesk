@@ -1361,9 +1361,13 @@
                                                 <TextBox Text="{Binding ScrcpyMaxFps}" />
                                             </StackPanel>
                                         </UniformGrid>
+                                        <CheckBox Content="Higher quality over USB (2560p · 90 fps · 40 Mbps)"
+                                                  IsChecked="{Binding BoostQualityOnCable}"
+                                                  Margin="0,12,0,0"
+                                                  MinHeight="32"
+                                                  ToolTip="The values above are treated as a floor. On a cable the preview is raised to at least this quality; over Wi-Fi it is left alone." />
                                         <CheckBox Content="Automatically launch scrcpy at startup"
                                                   IsChecked="{Binding AutomaticallyLaunchScrcpy}"
-                                                  Margin="0,12,0,0"
                                                   MinHeight="32" />
                                         <CheckBox Content="Automatically reconnect ADB"
                                                   IsChecked="{Binding AutomaticallyReconnect}"

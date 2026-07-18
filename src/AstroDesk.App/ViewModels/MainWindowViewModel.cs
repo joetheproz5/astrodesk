@@ -658,6 +658,13 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty]
     private int _scrcpyMaxFps = 60;
 
+    /// <summary>
+    /// Raises the stream quality above the saved settings when the phone is on
+    /// USB, where the link can carry it.
+    /// </summary>
+    [ObservableProperty]
+    private bool _boostQualityOnCable = true;
+
     [ObservableProperty]
     private int _statusRefreshSeconds = 20;
 
@@ -898,18 +905,10 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             string? serial = monitor?.Connection.SelectedDevice?.Serial
                              ?? SelectedAdbDevice?.Serial;
             ScrcpySession session = await _preview.StartAsync(
-                new ScrcpyLaunchOptions
-                {
-                    ExecutablePath = string.IsNullOrWhiteSpace(ScrcpyPath) ? null : ScrcpyPath,
-                    DeviceSerial = serial,
-                    VideoBitRateMbps = Math.Clamp(ScrcpyBitrateMbps, 1, 100),
-                    MaxSize = ScrcpyMaxResolution > 0 ? ScrcpyMaxResolution : null,
-                    MaxFps = ScrcpyMaxFps > 0 ? ScrcpyMaxFps : null,
-                    KeepAwake = true,
-                },
+                BuildLaunchOptions(serial),
                 _lifetimeCancellation.Token).ConfigureAwait(true);
             ScrcpyWindowHandle = session.WindowHandle;
-            StatusMessage = $"scrcpy started ({session.WindowTitle}).";
+            StatusMessage = DescribeStartedSession(session, serial);
         }
         catch (Exception exception)
         {
@@ -918,6 +917,61 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             PreviewStatus = "Embedded preview unavailable";
             StatusMessage = PreviewError;
         }
+    }
+
+    /// <summary>
+    /// Builds the scrcpy options, lifting the stream quality when the phone is on
+    /// a cable.
+    /// </summary>
+    /// <remarks>
+    /// The saved settings are the floor, never the ceiling: the cable profile can
+    /// only raise a value, so a deliberately higher setting is preserved and a
+    /// deliberately lower one is still honoured by turning the boost off. Without
+    /// that, opening Settings once would silently pin the cable back down to
+    /// whatever Wi-Fi could survive.
+    /// </remarks>
+    internal ScrcpyLaunchOptions BuildLaunchOptions(string? serial)
+    {
+        int maxSize = ScrcpyMaxResolution;
+        int maxFps = ScrcpyMaxFps;
+        int bitrate = ScrcpyBitrateMbps;
+
+        if (BoostQualityOnCable &&
+            DeviceTransportDetector.Detect(serial) == DeviceTransport.Cable)
+        {
+            ScrcpyQualityProfile profile = ScrcpyQualityProfile.Cable;
+            maxSize = Math.Max(maxSize, profile.MaxSize);
+            maxFps = Math.Max(maxFps, profile.MaxFps);
+            bitrate = Math.Max(bitrate, profile.VideoBitRateMbps);
+        }
+
+        return new ScrcpyLaunchOptions
+        {
+            ExecutablePath = string.IsNullOrWhiteSpace(ScrcpyPath) ? null : ScrcpyPath,
+            DeviceSerial = serial,
+            VideoBitRateMbps = Math.Clamp(bitrate, 1, 100),
+            MaxSize = maxSize > 0 ? maxSize : null,
+            MaxFps = maxFps > 0 ? maxFps : null,
+            KeepAwake = true,
+        };
+    }
+
+    /// <summary>
+    /// Reports the quality actually in use, so a boosted cable session is not a
+    /// silent difference from what Settings shows.
+    /// </summary>
+    private string DescribeStartedSession(ScrcpySession session, string? serial)
+    {
+        string link = DeviceTransportDetector.Detect(serial) switch
+        {
+            DeviceTransport.Cable => "cable",
+            DeviceTransport.Wireless => "wireless",
+            _ => "unknown link",
+        };
+
+        return $"scrcpy started over {link} at {session.Options.MaxSize?.ToString() ?? "native"}p, " +
+               $"{session.Options.MaxFps?.ToString() ?? "unlimited"} fps, " +
+               $"{session.Options.VideoBitRateMbps} Mbps.";
     }
 
     [RelayCommand]
@@ -2194,6 +2248,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             await settings.SetAsync("Scrcpy.BitrateMbps", ScrcpyBitrateMbps, "Device", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Scrcpy.MaxResolution", ScrcpyMaxResolution, "Device", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Scrcpy.MaxFps", ScrcpyMaxFps, "Device", _lifetimeCancellation.Token).ConfigureAwait(true);
+            await settings.SetAsync("Scrcpy.BoostOnCable", BoostQualityOnCable, "Device", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Status.RefreshSeconds", StatusRefreshSeconds, "Status", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Weather.RefreshMinutes", WeatherRefreshMinutes, "Conditions", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Session.DefaultLocation", DefaultLocationName, "Session", _lifetimeCancellation.Token).ConfigureAwait(true);
@@ -2434,6 +2489,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         ScrcpyBitrateMbps = await settings.GetAsync("Scrcpy.BitrateMbps", ScrcpyBitrateMbps, cancellationToken);
         ScrcpyMaxResolution = await settings.GetAsync("Scrcpy.MaxResolution", ScrcpyMaxResolution, cancellationToken);
         ScrcpyMaxFps = await settings.GetAsync("Scrcpy.MaxFps", ScrcpyMaxFps, cancellationToken);
+        BoostQualityOnCable = await settings.GetAsync("Scrcpy.BoostOnCable", BoostQualityOnCable, cancellationToken);
         StatusRefreshSeconds = await settings.GetAsync("Status.RefreshSeconds", StatusRefreshSeconds, cancellationToken);
         WeatherRefreshMinutes = await settings.GetAsync("Weather.RefreshMinutes", WeatherRefreshMinutes, cancellationToken);
         DefaultLocationName = await settings.GetAsync("Session.DefaultLocation", _appOptions.DefaultLocation, cancellationToken)
