@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -25,6 +26,7 @@ public partial class MainWindow : Window
     private bool _shutdownInProgress;
     private bool _shutdownComplete;
     private HwndSource? _windowSource;
+    private PreviewOverlayWindow? _guideOverlay;
     private bool _previewFullscreenApplied;
     private WindowStyle _savedWindowStyle;
     private ResizeMode _savedResizeMode;
@@ -60,6 +62,8 @@ public partial class MainWindow : Window
 
     private async void HandleLoaded(object sender, RoutedEventArgs args)
     {
+        CreateGuideOverlay();
+
         try
         {
             await _viewModel.InitializeAsync();
@@ -75,8 +79,95 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Builds the transparent window that carries the framing guides above the
+    /// native scrcpy window.
+    /// </summary>
+    /// <remarks>
+    /// Its content is a second <see cref="PhonePreviewControl"/> in guides-only
+    /// mode rather than a purpose-built element, so the guides on the two
+    /// surfaces are drawn by exactly the same code and cannot drift apart.
+    /// </remarks>
+    private void CreateGuideOverlay()
+    {
+        if (_guideOverlay is not null)
+        {
+            return;
+        }
+
+        PhonePreviewControl guides = new()
+        {
+            GuidesOnly = true,
+            IsHitTestVisible = false,
+            DataContext = _viewModel,
+        };
+
+        BindGuide(guides, PhonePreviewControl.RuleOfThirdsProperty, nameof(MainWindowViewModel.RuleOfThirds));
+        BindGuide(guides, PhonePreviewControl.CrosshairProperty, nameof(MainWindowViewModel.Crosshair));
+        BindGuide(guides, PhonePreviewControl.DiagonalGuidesProperty, nameof(MainWindowViewModel.DiagonalGuides));
+        BindGuide(guides, PhonePreviewControl.SafeAreaProperty, nameof(MainWindowViewModel.SafeArea));
+        BindGuide(guides, PhonePreviewControl.HorizonLineProperty, nameof(MainWindowViewModel.HorizonLine));
+        BindGuide(guides, PhonePreviewControl.CustomRectangleProperty, nameof(MainWindowViewModel.CustomRectangle));
+        BindGuide(guides, PhonePreviewControl.CircleOverlayProperty, nameof(MainWindowViewModel.CircleOverlay));
+        BindGuide(
+            guides,
+            PhonePreviewControl.CustomRectangleWidthPercentProperty,
+            nameof(MainWindowViewModel.CustomRectangleWidthPercent));
+        BindGuide(
+            guides,
+            PhonePreviewControl.CustomRectangleHeightPercentProperty,
+            nameof(MainWindowViewModel.CustomRectangleHeightPercent));
+        BindGuide(guides, PhonePreviewControl.OverlayBrushProperty, nameof(MainWindowViewModel.OverlayBrush));
+        BindGuide(guides, PhonePreviewControl.OverlayOpacityProperty, nameof(MainWindowViewModel.OverlayOpacity));
+        BindGuide(guides, PhonePreviewControl.OverlayThicknessProperty, nameof(MainWindowViewModel.OverlayThickness));
+
+        _guideOverlay = new PreviewOverlayWindow { Content = guides };
+        _guideOverlay.Attach(this);
+        UpdateGuideOverlayTarget();
+    }
+
+    private static void BindGuide(
+        PhonePreviewControl target,
+        DependencyProperty property,
+        string path) =>
+        target.SetBinding(property, new Binding(path) { Mode = BindingMode.OneWay });
+
+    /// <summary>
+    /// Points the overlay at whichever preview is currently showing scrcpy's own
+    /// window, or hides it when nothing is.
+    /// </summary>
+    /// <remarks>
+    /// The guides are only needed where WPF cannot draw them. When scrcpy is not
+    /// running, the preview control underneath draws its own guides over the
+    /// captured frame, and floating a second copy on top would double every line.
+    /// The two handle properties are mutually exclusive by construction, so at
+    /// most one target is ever live.
+    /// </remarks>
+    private void UpdateGuideOverlayTarget()
+    {
+        if (_guideOverlay is null)
+        {
+            return;
+        }
+
+        FrameworkElement? target = null;
+        if (_viewModel.MainScrcpyWindowHandle != nint.Zero)
+        {
+            target = PhonePreview;
+        }
+        else if (_viewModel.FullscreenScrcpyWindowHandle != nint.Zero)
+        {
+            target = FullscreenPhonePreview;
+        }
+
+        _guideOverlay.SetTarget(target);
+    }
+
     private void HandleClosed(object? sender, EventArgs args)
     {
+        _guideOverlay?.Detach();
+        _guideOverlay?.Close();
+        _guideOverlay = null;
         UnregisterPreviewFullscreenHotKey();
         _windowSource?.RemoveHook(WindowMessageHook);
         _windowSource = null;
@@ -120,9 +211,20 @@ public partial class MainWindow : Window
 
     private void HandleViewModelPropertyChanged(object? sender, PropertyChangedEventArgs args)
     {
+        // Both handles change whenever scrcpy starts, stops, or the preview moves
+        // between docked and fullscreen, which is exactly when the guides need to
+        // follow it to a different element.
+        if (args.PropertyName is nameof(MainWindowViewModel.MainScrcpyWindowHandle)
+            or nameof(MainWindowViewModel.FullscreenScrcpyWindowHandle))
+        {
+            UpdateGuideOverlayTarget();
+            return;
+        }
+
         if (args.PropertyName == nameof(MainWindowViewModel.IsPreviewFullscreen))
         {
             ApplyPreviewFullscreenMode(_viewModel.IsPreviewFullscreen);
+            UpdateGuideOverlayTarget();
             return;
         }
 

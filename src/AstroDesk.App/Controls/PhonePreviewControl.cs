@@ -157,6 +157,23 @@ public sealed class PhonePreviewControl : FrameworkElement
         typeof(PhonePreviewControl),
         new FrameworkPropertyMetadata(default(Size), FrameworkPropertyMetadataOptions.AffectsRender));
 
+    /// <summary>
+    /// Draws the framing guides and nothing else, over a fully transparent
+    /// background.
+    /// </summary>
+    /// <remarks>
+    /// This is what lets the guides appear on top of the real scrcpy video. WPF
+    /// cannot composite over the native child window that scrcpy is reparented
+    /// into, so an instance in this mode is hosted in a separate transparent
+    /// window floating above it. Sharing the control rather than reimplementing
+    /// the geometry keeps the two surfaces from drifting apart.
+    /// </remarks>
+    public static readonly DependencyProperty GuidesOnlyProperty = DependencyProperty.Register(
+        nameof(GuidesOnly),
+        typeof(bool),
+        typeof(PhonePreviewControl),
+        new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.AffectsRender));
+
     private Point _lastCursorPosition;
     private TouchDevice? _activeTouchDevice;
     private long _suppressMouseUntilTimestamp;
@@ -332,6 +349,12 @@ public sealed class PhonePreviewControl : FrameworkElement
         set => SetValue(ScrcpyClientSizeProperty, value);
     }
 
+    public bool GuidesOnly
+    {
+        get => (bool)GetValue(GuidesOnlyProperty);
+        set => SetValue(GuidesOnlyProperty, value);
+    }
+
     public CoordinateMappingContext? CreateMappingContext()
     {
         if (Source is null || ActualWidth <= 0 || ActualHeight <= 0)
@@ -358,6 +381,17 @@ public sealed class PhonePreviewControl : FrameworkElement
     protected override void OnRender(DrawingContext drawingContext)
     {
         base.OnRender(drawingContext);
+
+        // No background fill: every pixel this mode does not draw has to stay
+        // transparent so the scrcpy video underneath shows through. The guides
+        // span the whole surface because the host is aspect-locked to the phone,
+        // so scrcpy's own letterboxing is negligible.
+        if (GuidesOnly)
+        {
+            DrawOverlays(drawingContext, new Rect(RenderSize));
+            return;
+        }
+
         drawingContext.DrawRectangle(
             FindBrush("PreviewBackgroundBrush", Brushes.Black),
             null,
