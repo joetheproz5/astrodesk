@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
@@ -158,22 +159,31 @@ public sealed class PhonePreviewControl : FrameworkElement
 
     private Point _lastCursorPosition;
     private TouchDevice? _activeTouchDevice;
+    private long _suppressMouseUntilTimestamp;
 
     public PhonePreviewControl()
     {
         Focusable = true;
         ClipToBounds = true;
         SnapsToDevicePixels = true;
-        MouseDown += HandleMouseDown;
-        MouseMove += HandleMouseMove;
-        MouseUp += HandleMouseUp;
-        MouseWheel += HandleMouseWheel;
-        TouchDown += HandleTouchDown;
-        TouchMove += HandleTouchMove;
-        TouchUp += HandleTouchUp;
+        IsManipulationEnabled = false;
+        Stylus.SetIsPressAndHoldEnabled(this, false);
+        Stylus.SetIsFlicksEnabled(this, false);
+
+        // Listen during the tunneling phase so a parent ScrollViewer cannot turn a
+        // phone tap into a dashboard pan before the preview sees it. Mouse handlers
+        // deliberately do not opt into handled events: handled touch must never be
+        // re-admitted as WPF's promoted mouse stream.
+        AddHandler(Mouse.PreviewMouseDownEvent, new MouseButtonEventHandler(HandleMouseDown), false);
+        AddHandler(Mouse.PreviewMouseMoveEvent, new MouseEventHandler(HandleMouseMove), false);
+        AddHandler(Mouse.PreviewMouseUpEvent, new MouseButtonEventHandler(HandleMouseUp), false);
+        AddHandler(Mouse.PreviewMouseWheelEvent, new MouseWheelEventHandler(HandleMouseWheel), false);
+        AddHandler(PreviewTouchDownEvent, new EventHandler<TouchEventArgs>(HandleTouchDown), true);
+        AddHandler(PreviewTouchMoveEvent, new EventHandler<TouchEventArgs>(HandleTouchMove), true);
+        AddHandler(PreviewTouchUpEvent, new EventHandler<TouchEventArgs>(HandleTouchUp), true);
         LostTouchCapture += HandleLostTouchCapture;
-        KeyDown += HandleKeyDown;
-        TextInput += HandleTextInput;
+        AddHandler(Keyboard.PreviewKeyDownEvent, new KeyEventHandler(HandleKeyDown), true);
+        AddHandler(TextCompositionManager.PreviewTextInputEvent, new TextCompositionEventHandler(HandleTextInput), true);
     }
 
     public event EventHandler<PreviewInputEventArgs>? PreviewInput;
@@ -595,6 +605,12 @@ public sealed class PhonePreviewControl : FrameworkElement
 
     private void HandleMouseDown(object sender, MouseButtonEventArgs args)
     {
+        if (ShouldSuppressMouse())
+        {
+            args.Handled = true;
+            return;
+        }
+
         Focus();
         CaptureMouse();
         Point position = args.GetPosition(this);
@@ -608,6 +624,12 @@ public sealed class PhonePreviewControl : FrameworkElement
 
     private void HandleMouseMove(object sender, MouseEventArgs args)
     {
+        if (ShouldSuppressMouse())
+        {
+            args.Handled = true;
+            return;
+        }
+
         Point position = args.GetPosition(this);
         _lastCursorPosition = position;
         PreviewInput?.Invoke(this, new PreviewInputEventArgs(PreviewInputKind.MouseMove, position));
@@ -619,6 +641,12 @@ public sealed class PhonePreviewControl : FrameworkElement
 
     private void HandleMouseUp(object sender, MouseButtonEventArgs args)
     {
+        if (ShouldSuppressMouse())
+        {
+            args.Handled = true;
+            return;
+        }
+
         Point position = args.GetPosition(this);
         _lastCursorPosition = position;
         PreviewInput?.Invoke(
@@ -630,6 +658,12 @@ public sealed class PhonePreviewControl : FrameworkElement
 
     private void HandleMouseWheel(object sender, MouseWheelEventArgs args)
     {
+        if (ShouldSuppressMouse())
+        {
+            args.Handled = true;
+            return;
+        }
+
         Point position = args.GetPosition(this);
         PreviewInput?.Invoke(
             this,
@@ -639,6 +673,7 @@ public sealed class PhonePreviewControl : FrameworkElement
 
     private void HandleTouchDown(object? sender, TouchEventArgs args)
     {
+        SuppressPromotedMouse();
         if (_activeTouchDevice is not null)
         {
             args.Handled = true;
@@ -657,6 +692,7 @@ public sealed class PhonePreviewControl : FrameworkElement
 
     private void HandleTouchMove(object? sender, TouchEventArgs args)
     {
+        SuppressPromotedMouse();
         if (_activeTouchDevice != args.TouchDevice)
         {
             args.Handled = true;
@@ -676,6 +712,7 @@ public sealed class PhonePreviewControl : FrameworkElement
 
     private void HandleTouchUp(object? sender, TouchEventArgs args)
     {
+        SuppressPromotedMouse();
         if (_activeTouchDevice != args.TouchDevice)
         {
             args.Handled = true;
@@ -692,6 +729,7 @@ public sealed class PhonePreviewControl : FrameworkElement
 
     private void HandleLostTouchCapture(object? sender, TouchEventArgs args)
     {
+        SuppressPromotedMouse();
         if (_activeTouchDevice != args.TouchDevice)
         {
             return;
@@ -700,6 +738,14 @@ public sealed class PhonePreviewControl : FrameworkElement
         _activeTouchDevice = null;
         PreviewInput?.Invoke(this, new PreviewInputEventArgs(PreviewInputKind.TouchUp, _lastCursorPosition));
     }
+
+    private void SuppressPromotedMouse()
+    {
+        _suppressMouseUntilTimestamp = Stopwatch.GetTimestamp() + (Stopwatch.Frequency / 2);
+    }
+
+    private bool ShouldSuppressMouse() =>
+        _activeTouchDevice is not null || Stopwatch.GetTimestamp() <= _suppressMouseUntilTimestamp;
 
     private void HandleKeyDown(object sender, KeyEventArgs args)
     {

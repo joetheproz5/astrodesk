@@ -24,6 +24,9 @@ public static class ScrcpyArgumentBuilder
         {
             "--window-title",
             windowTitle,
+            "--window-x=-32000",
+            "--window-y=-32000",
+            "--capture-orientation=@270",
             "--no-audio",
             $"--video-bit-rate={options.VideoBitRateMbps.ToString(CultureInfo.InvariantCulture)}M",
         };

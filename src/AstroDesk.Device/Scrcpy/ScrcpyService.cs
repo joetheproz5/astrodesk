@@ -66,11 +66,7 @@ public sealed class ScrcpyService : IScrcpyService
                 var staleProcess = _process;
                 _process = null;
                 _session = null;
-                if (_windowPresentation is not null)
-                {
-                    RestoreQuietly(_windowPresentation);
-                    _windowPresentation = null;
-                }
+                _windowPresentation = null;
 
                 await StopAndDisposeQuietlyAsync(staleProcess).ConfigureAwait(false);
             }
@@ -92,6 +88,10 @@ public sealed class ScrcpyService : IScrcpyService
                     executablePath,
                     arguments,
                     WorkingDirectory: Path.GetDirectoryName(executablePath),
+                    EnvironmentVariables: new Dictionary<string, string?>
+                    {
+                        ["SDL_MOUSE_FOCUS_CLICKTHROUGH"] = "1",
+                    },
                     SensitiveValues: sensitiveValues,
                     CreateNoWindow: true,
                     OutputReceived: RaiseLogReceived),
@@ -199,11 +199,7 @@ public sealed class ScrcpyService : IScrcpyService
             SetState(ScrcpyState.Stopping);
             _process = null;
             _session = null;
-            if (_windowPresentation is not null)
-            {
-                RestoreQuietly(_windowPresentation);
-                _windowPresentation = null;
-            }
+            _windowPresentation = null;
 
             try
             {
@@ -242,11 +238,6 @@ public sealed class ScrcpyService : IScrcpyService
                 return;
             }
 
-            if (_windowPresentation is not null)
-            {
-                RestoreQuietly(_windowPresentation);
-            }
-
             _process = null;
             _session = null;
             _windowPresentation = null;
@@ -278,18 +269,6 @@ public sealed class ScrcpyService : IScrcpyService
         }
 
         await process.DisposeAsync().ConfigureAwait(false);
-    }
-
-    private void RestoreQuietly(WindowPresentationState state)
-    {
-        try
-        {
-            _windowManager.Restore(state);
-        }
-        catch (Exception exception)
-        {
-            _logger.LogDebug(exception, "Could not restore the hidden scrcpy window.");
-        }
     }
 
     private void SetState(ScrcpyState state)

@@ -36,3 +36,6 @@ Desktop.ini
 ## Publish output
 publish/
 installer-output/
+
+# Bundled external tools (scrcpy, Siril). Large binaries, fetched per machine.
+tools/

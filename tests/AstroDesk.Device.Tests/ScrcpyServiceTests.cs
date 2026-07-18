@@ -30,6 +30,7 @@ public sealed class ScrcpyServiceTests
         Assert.Contains("--no-audio", invocation.Arguments);
         Assert.Contains("--stay-awake", invocation.Arguments);
         Assert.Contains("SECRET-SERIAL", invocation.SensitiveValues!);
+        Assert.Equal("1", invocation.EnvironmentVariables!["SDL_MOUSE_FOCUS_CLICKTHROUGH"]);
     }
 
     [Fact]
@@ -50,7 +51,7 @@ public sealed class ScrcpyServiceTests
         Assert.Equal(session, args.Session);
         Assert.Equal(ScrcpyState.Crashed, service.State);
         Assert.Null(service.CurrentSession);
-        Assert.True(windows.Restored);
+        Assert.False(windows.Restored);
     }
 
     private static ScrcpyService CreateService(

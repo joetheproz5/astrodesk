@@ -3,7 +3,9 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Media;
+using System.Net;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -15,6 +17,7 @@ using AstroDesk.Capture.Histogram;
 using AstroDesk.Core.Calculations;
 using AstroDesk.Core.Entities;
 using AstroDesk.Core.Enums;
+using AstroDesk.Stacking;
 using AstroDesk.Core.Interfaces;
 using AstroDesk.Core.Models;
 using AstroDesk.Device;
@@ -49,7 +52,11 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private readonly AstroDeskAppOptions _appOptions;
     private readonly AppPaths _paths;
     private readonly ISessionAssetService _sessionAssets;
+    private readonly IPhonePhotoSyncService _photoSync;
     private readonly INightModeService _nightMode;
+    private readonly IStackSessionService _stackSession;
+    private readonly IStackEngine _stackEngine;
+    private readonly IAutoCaptureService _autoCapture;
     private readonly ILogger<MainWindowViewModel> _logger;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private readonly DispatcherTimer _elapsedTimer;
@@ -68,6 +75,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private PreviewFrameSnapshot? _pendingPreviewFrame;
     private int _previewDispatchScheduled;
     private CancellationTokenSource? _wirelessQrCancellation;
+    private int _disposed;
 
     public MainWindowViewModel(
         IServiceScopeFactory scopeFactory,
@@ -86,7 +94,11 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         AstroDeskAppOptions appOptions,
         AppPaths paths,
         ISessionAssetService sessionAssets,
+        IPhonePhotoSyncService photoSync,
         INightModeService nightMode,
+        IStackSessionService stackSession,
+        IStackEngine stackEngine,
+        IAutoCaptureService autoCapture,
         ILogger<MainWindowViewModel> logger)
     {
         _scopeFactory = scopeFactory;
@@ -105,7 +117,20 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _appOptions = appOptions;
         _paths = paths;
         _sessionAssets = sessionAssets;
+        _photoSync = photoSync;
         _nightMode = nightMode;
+        _stackSession = stackSession;
+        _stackEngine = stackEngine;
+        _autoCapture = autoCapture;
+        _stackSession.FrameAdded += HandleStackFrameAdded;
+        _autoCapture.Triggered += HandleAutoCaptureTriggered;
+        _autoCapture.Finished += HandleAutoCaptureFinished;
+        _autoCapture.TelemetryChanged += HandleAutoCaptureTelemetry;
+
+        // Surface whatever the engine resolved (bundled copy or environment
+        // override) so the Settings field reflects reality instead of looking
+        // unconfigured while stacking actually works.
+        SirilPath = stackEngine.ExecutablePath;
         _logger = logger;
 
         ExposureSeconds = _appOptions.DefaultExposureSeconds;
@@ -125,6 +150,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         AdbPath = _deviceToolOptions.AdbExecutablePath ?? string.Empty;
         ScrcpyPath = _deviceToolOptions.ScrcpyExecutablePath ?? string.Empty;
         ScreenshotFolder = _paths.ScreenshotRoot;
+        PhoneCaptureFolder = _paths.PhoneCaptureRoot;
         SessionDataFolder = _paths.SessionRoot;
 
         _elapsedTimer = new DispatcherTimer(DispatcherPriority.Background)
@@ -258,6 +284,15 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     [ObservableProperty]
     private Size _scrcpyClientSize;
+
+    [ObservableProperty]
+    private nint _scrcpyWindowHandle;
+
+    public nint MainScrcpyWindowHandle =>
+        IsPreviewFullscreen || ShowWirelessPanel ? nint.Zero : ScrcpyWindowHandle;
+
+    public nint FullscreenScrcpyWindowHandle =>
+        IsPreviewFullscreen ? ScrcpyWindowHandle : nint.Zero;
 
     [ObservableProperty]
     private FrameRotation _previewRotation = FrameRotation.Rotate0;
@@ -632,6 +667,12 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private string _screenshotFolder = string.Empty;
 
     [ObservableProperty]
+    private string _phoneCaptureFolder = string.Empty;
+
+    [ObservableProperty]
+    private bool _automaticallyImportPhonePhotos = true;
+
+    [ObservableProperty]
     private string _sessionDataFolder = string.Empty;
 
     [ObservableProperty]
@@ -653,13 +694,26 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private NightDisplayMode _selectedNightMode = NightDisplayMode.NormalDark;
 
     [ObservableProperty]
+    private string _selectedWindowMode = "Windowed fullscreen";
+
+    [ObservableProperty]
     private string _settingsStatusText = "Settings are stored locally.";
+
+    public IReadOnlyList<string> WindowModeOptions { get; } =
+    [
+        "Windowed",
+        "Borderless window",
+        "Windowed fullscreen",
+        "Fullscreen",
+    ];
 
     public bool IsDashboard => CurrentPage == "Dashboard";
 
     public bool IsHistory => CurrentPage == "History";
 
     public bool IsSettings => CurrentPage == "Settings";
+
+    public bool IsStacking => CurrentPage == "Stacking";
 
     public bool HasActiveSession => _activeSession is not null;
 
@@ -689,6 +743,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             _preview.FrameReady += HandlePreviewFrame;
             _preview.HistogramReady += HandleHistogram;
             _preview.StatusChanged += HandlePreviewStatus;
+            _photoSync.PhotoImported += HandlePhonePhotoImported;
             _deviceMonitor.SnapshotChanged += HandleDeviceSnapshot;
             _exposureTimer.Tick += HandleTimerTick;
             subscribed = true;
@@ -737,6 +792,11 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         _wirelessQrCancellation?.Cancel();
         _wirelessQrCancellation?.Dispose();
         _wirelessQrCancellation = null;
@@ -745,9 +805,11 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _preview.FrameReady -= HandlePreviewFrame;
         _preview.HistogramReady -= HandleHistogram;
         _preview.StatusChanged -= HandlePreviewStatus;
+        _photoSync.PhotoImported -= HandlePhonePhotoImported;
         _deviceMonitor.SnapshotChanged -= HandleDeviceSnapshot;
         _exposureTimer.Tick -= HandleTimerTick;
 
+        ScrcpyWindowHandle = nint.Zero;
         await _exposureTimer.StopAsync().ConfigureAwait(false);
         await _deviceMonitor.StopAsync().ConfigureAwait(false);
         await _preview.StopAsync().ConfigureAwait(false);
@@ -781,6 +843,8 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public void SetScreenshotFolder(string path) => ScreenshotFolder = path;
 
+    public void SetPhoneCaptureFolder(string path) => PhoneCaptureFolder = path;
+
     public void SetSessionDataFolder(string path) => SessionDataFolder = path;
 
     [RelayCommand]
@@ -791,6 +855,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     [RelayCommand]
     private void ShowSettings() => CurrentPage = "Settings";
+
+    [RelayCommand]
+    private void ShowStacking() => CurrentPage = "Stacking";
 
     [RelayCommand]
     private async Task StartPreviewAsync()
@@ -808,6 +875,14 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 return;
             }
 
+            if (monitor?.Connection.IsConnected != true)
+            {
+                ShowWirelessPanel = true;
+                WirelessStatus = "The phone is paired but not connected yet. On the phone's main Wireless debugging screen, copy its IP address and port into Connect directly, then press Connect.";
+                StatusMessage = "No authorized ADB device is connected. Finish the wireless connection first.";
+                return;
+            }
+
             string? serial = monitor?.Connection.SelectedDevice?.Serial
                              ?? SelectedAdbDevice?.Serial;
             ScrcpySession session = await _preview.StartAsync(
@@ -821,6 +896,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                     KeepAwake = true,
                 },
                 _lifetimeCancellation.Token).ConfigureAwait(true);
+            ScrcpyWindowHandle = session.WindowHandle;
             StatusMessage = $"scrcpy started ({session.WindowTitle}).";
         }
         catch (Exception exception)
@@ -837,6 +913,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     {
         try
         {
+            ScrcpyWindowHandle = nint.Zero;
             await _preview.StopAsync(_lifetimeCancellation.Token).ConfigureAwait(true);
             PreviewImage = null;
             PreviewError = null;
@@ -854,7 +931,11 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         try
         {
             PreviewError = null;
-            _ = await _preview.ReconnectAsync(_lifetimeCancellation.Token).ConfigureAwait(true);
+            ScrcpyWindowHandle = nint.Zero;
+            ScrcpySession session = await _preview
+                .ReconnectAsync(_lifetimeCancellation.Token)
+                .ConfigureAwait(true);
+            ScrcpyWindowHandle = session.WindowHandle;
         }
         catch (Exception exception)
         {
@@ -970,39 +1051,24 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 throw new InvalidOperationException("Enter the six-digit pairing code shown on the phone.");
             }
 
-            IReadOnlyList<AdbMdnsService> discovered;
-            try
-            {
-                discovered = await _adbWireless.GetMdnsServicesAsync(
-                    _lifetimeCancellation.Token).ConfigureAwait(true);
-            }
-            catch (Exception exception)
-            {
-                _logger.LogDebug(exception, "Could not refresh the temporary pairing address; using the address entered by the user.");
-                discovered = [];
-            }
-            AdbMdnsService[] pairingServices = discovered
-                .Where(static service => service.ServiceType == "_adb-tls-pairing._tcp")
-                .Where(static service => service.InstanceName.StartsWith("adb-", StringComparison.Ordinal))
-                .ToArray();
-            if (pairingServices.Length == 1 && pairingServices[0].Endpoint != endpoint)
-            {
-                endpoint = pairingServices[0].Endpoint;
-                WirelessPairingEndpoint = endpoint;
-                WirelessStatus = $"Found the phone's current temporary pairing address: {endpoint}. Pairing…";
-            }
-            else
-            {
-                WirelessStatus = $"Pairing with {endpoint}…";
-            }
+            WirelessPairingEndpoint = endpoint;
+            WirelessStatus = $"Pairing with {endpoint}…";
 
             await _adbWireless.PairWirelessAsync(
                 endpoint,
                 code,
                 _lifetimeCancellation.Token).ConfigureAwait(true);
             WirelessPairingCode = string.Empty;
-            WirelessStatus = "Paired. Copy the separate IP address and port from the main Wireless debugging screen, then tap Connect.";
-            StatusMessage = "Wireless ADB pairing completed.";
+            WirelessStatus = "Paired. Looking for the phone's secure connection port…";
+            string? connectedEndpoint = await TryAutoConnectPairedPhoneAsync(
+                endpoint,
+                _lifetimeCancellation.Token).ConfigureAwait(true);
+            WirelessStatus = connectedEndpoint is null
+                ? "Pairing succeeded, but the phone is NOT connected yet. Return to the main Wireless debugging screen on the phone, copy its different IP address and port into Connect directly above, then press Connect."
+                : $"Paired and connected wirelessly to {connectedEndpoint}.";
+            StatusMessage = connectedEndpoint is null
+                ? "Wireless ADB pairing completed."
+                : "Wireless ADB paired and connected.";
         }
         catch (Exception exception)
         {
@@ -1026,6 +1092,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         IsWirelessBusy = true;
         try
         {
+            WirelessStatus = "Restarting ADB wireless discovery…";
+            await _adbWireless.RestartWirelessDiscoveryAsync(
+                _lifetimeCancellation.Token).ConfigureAwait(true);
             WirelessStatus = "Looking for the open pairing-code screen on this Wi-Fi…";
             IReadOnlyList<AdbMdnsService> services = await _adbWireless.GetMdnsServicesAsync(
                 _lifetimeCancellation.Token).ConfigureAwait(true);
@@ -1078,11 +1147,15 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         WirelessQrCodeImage = CreateQrCodeImage(payload);
         IsWirelessQrActive = true;
         IsWirelessBusy = true;
-        WirelessStatus = "On the S23, open Wireless debugging → Pair device with QR code, then scan this code.";
+        WirelessStatus = "Restarting ADB wireless discovery…";
 
         try
         {
+            await _adbWireless.RestartWirelessDiscoveryAsync(cancellation.Token).ConfigureAwait(true);
+            WirelessStatus = "On the S23, open Wireless debugging → Pair device with QR code, then scan this code.";
             DateTimeOffset deadline = DateTimeOffset.UtcNow.AddMinutes(2);
+            DateTimeOffset discoveryHintAt = DateTimeOffset.UtcNow.AddSeconds(12);
+            bool discoveryHintShown = false;
             while (DateTimeOffset.UtcNow < deadline)
             {
                 cancellation.Token.ThrowIfCancellationRequested();
@@ -1098,11 +1171,23 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                         pairingService.Endpoint,
                         password,
                         cancellation.Token).ConfigureAwait(true);
-                    await Task.Delay(TimeSpan.FromSeconds(1), cancellation.Token).ConfigureAwait(true);
-                    await _deviceMonitor.PollOnceAsync(cancellation.Token).ConfigureAwait(true);
-                    WirelessStatus = "QR pairing complete. The S23 should connect automatically; if it does not, use the Connect address shown on the main Wireless debugging screen.";
-                    StatusMessage = "Wireless ADB QR pairing completed.";
+                    WirelessStatus = "QR pairing complete. Looking for the secure connection port…";
+                    string? connectedEndpoint = await TryAutoConnectPairedPhoneAsync(
+                        pairingService.Endpoint,
+                        cancellation.Token).ConfigureAwait(true);
+                    WirelessStatus = connectedEndpoint is null
+                        ? "QR pairing succeeded, but the phone is NOT connected yet. Return to the main Wireless debugging screen on the phone, copy its different IP address and port into Connect directly above, then press Connect."
+                        : $"QR pairing complete. Connected wirelessly to {connectedEndpoint}.";
+                    StatusMessage = connectedEndpoint is null
+                        ? "Wireless ADB QR pairing completed."
+                        : "Wireless ADB QR pairing completed and connected.";
                     return;
+                }
+
+                if (!discoveryHintShown && DateTimeOffset.UtcNow >= discoveryHintAt)
+                {
+                    discoveryHintShown = true;
+                    WirelessStatus = "No QR pairing service has reached this laptop yet. If the phone is spinning, cancel QR and use the six-digit code; some Windows hotspots block QR discovery.";
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(1), cancellation.Token).ConfigureAwait(true);
@@ -1137,6 +1222,46 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private void CancelQrPairing()
     {
         _wirelessQrCancellation?.Cancel();
+    }
+
+    private async Task<string?> TryAutoConnectPairedPhoneAsync(
+        string pairingEndpoint,
+        CancellationToken cancellationToken)
+    {
+        int separator = pairingEndpoint.LastIndexOf(':');
+        string address = separator > 0 ? pairingEndpoint[..separator] : pairingEndpoint;
+        for (int attempt = 0; attempt < 12; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                IReadOnlyList<AdbMdnsService> services = await _adbWireless.GetMdnsServicesAsync(
+                    cancellationToken).ConfigureAwait(true);
+                AdbMdnsService? connectService = services.FirstOrDefault(
+                    service => service.ServiceType == "_adb-tls-connect._tcp" &&
+                               service.Endpoint.StartsWith(
+                                   address + ":",
+                                   StringComparison.OrdinalIgnoreCase));
+                if (connectService is not null)
+                {
+                    await _adbWireless.ConnectWirelessAsync(
+                        connectService.Endpoint,
+                        cancellationToken).ConfigureAwait(true);
+                    WirelessEndpoint = connectService.Endpoint;
+                    await _deviceMonitor.PollOnceAsync(cancellationToken).ConfigureAwait(true);
+                    return connectService.Endpoint;
+                }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                _logger.LogDebug(exception, "Could not auto-connect immediately after wireless pairing.");
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(true);
+        }
+
+        await _deviceMonitor.PollOnceAsync(cancellationToken).ConfigureAwait(true);
+        return null;
     }
 
     [RelayCommand]
@@ -1190,9 +1315,6 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     [RelayCommand]
     private Task PowerAsync() => ExecuteToolbarAsync(DeviceToolbarAction.Power);
-
-    [RelayCommand]
-    private Task RotatePhoneAsync() => ExecuteToolbarAsync(DeviceToolbarAction.RotatePhone);
 
     [RelayCommand]
     private Task KeepPhoneAwakeAsync() => ExecuteToolbarAsync(DeviceToolbarAction.KeepAwake);
@@ -2051,6 +2173,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         {
             ValidateSettings();
             _paths.SetScreenshotRoot(ScreenshotFolder);
+            _paths.SetPhoneCaptureRoot(PhoneCaptureFolder);
             _paths.SetSessionRoot(SessionDataFolder);
             await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
             ISettingsService settings = scope.ServiceProvider.GetRequiredService<ISettingsService>();
@@ -2065,6 +2188,8 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             await settings.SetAsync("Session.DefaultExposureSeconds", DefaultExposureSeconds, "Session", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Session.DefaultFrameCount", DefaultFrameCount, "Session", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Files.ScreenshotFolder", ScreenshotFolder, "Files", _lifetimeCancellation.Token).ConfigureAwait(true);
+            await settings.SetAsync("Files.PhoneCaptureFolder", PhoneCaptureFolder, "Files", _lifetimeCancellation.Token).ConfigureAwait(true);
+            await settings.SetAsync("Files.AutoImportPhonePhotos", AutomaticallyImportPhonePhotos, "Files", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Files.SessionDataFolder", SessionDataFolder, "Files", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Startup.AutoLaunchScrcpy", AutomaticallyLaunchScrcpy, "Startup", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Startup.AutoReconnect", AutomaticallyReconnect, "Startup", _lifetimeCancellation.Token).ConfigureAwait(true);
@@ -2087,11 +2212,14 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             await settings.SetAsync("Overlay.RectangleHeightPercent", CustomRectangleHeightPercent, "Overlay", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Histogram.UpdateMilliseconds", HistogramUpdateMilliseconds, "Histogram", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Display.NightMode", SelectedNightMode, "Display", _lifetimeCancellation.Token).ConfigureAwait(true);
+            await settings.SetAsync("Display.WindowMode", SelectedWindowMode, "Display", _lifetimeCancellation.Token).ConfigureAwait(true);
 
             _deviceToolOptions.AdbExecutablePath = string.IsNullOrWhiteSpace(AdbPath) ? null : AdbPath;
             _deviceToolOptions.ScrcpyExecutablePath = string.IsNullOrWhiteSpace(ScrcpyPath) ? null : ScrcpyPath;
             _deviceMonitorOptions.RefreshInterval = TimeSpan.FromSeconds(StatusRefreshSeconds);
             _deviceMonitorOptions.AutoReconnect = AutomaticallyReconnect;
+            _photoSync.DestinationFolder = PhoneCaptureFolder;
+            _photoSync.Enabled = AutomaticallyImportPhonePhotos;
             SettingsStatusText =
                 "Settings saved locally. Device polling and asset folders are active immediately.";
         }
@@ -2107,6 +2235,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(IsDashboard));
         OnPropertyChanged(nameof(IsHistory));
         OnPropertyChanged(nameof(IsSettings));
+        OnPropertyChanged(nameof(IsStacking));
     }
 
     partial void OnShowNightBriefDrawerChanged(bool value)
@@ -2127,6 +2256,8 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     partial void OnShowWirelessPanelChanged(bool value)
     {
+        OnPropertyChanged(nameof(MainScrcpyWindowHandle));
+
         if (!value)
         {
             _wirelessQrCancellation?.Cancel();
@@ -2135,12 +2266,21 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     partial void OnIsPreviewFullscreenChanged(bool value)
     {
+        OnPropertyChanged(nameof(MainScrcpyWindowHandle));
+        OnPropertyChanged(nameof(FullscreenScrcpyWindowHandle));
+
         if (value)
         {
             ShowNightBriefDrawer = false;
             ShowSessionDrawer = false;
             ShowWirelessPanel = false;
         }
+    }
+
+    partial void OnScrcpyWindowHandleChanged(nint value)
+    {
+        OnPropertyChanged(nameof(MainScrcpyWindowHandle));
+        OnPropertyChanged(nameof(FullscreenScrcpyWindowHandle));
     }
 
     partial void OnSelectedSessionTypeChanged(SessionType value) =>
@@ -2290,6 +2430,12 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         DefaultFrameCount = await settings.GetAsync("Session.DefaultFrameCount", PlannedFrameCount, cancellationToken);
         ScreenshotFolder = await settings.GetAsync("Files.ScreenshotFolder", ScreenshotFolder, cancellationToken)
                            ?? ScreenshotFolder;
+        PhoneCaptureFolder = await settings.GetAsync("Files.PhoneCaptureFolder", PhoneCaptureFolder, cancellationToken)
+                             ?? PhoneCaptureFolder;
+        AutomaticallyImportPhonePhotos = await settings.GetAsync(
+            "Files.AutoImportPhonePhotos",
+            AutomaticallyImportPhonePhotos,
+            cancellationToken);
         SessionDataFolder = await settings.GetAsync("Files.SessionDataFolder", SessionDataFolder, cancellationToken)
                             ?? SessionDataFolder;
         AutomaticallyLaunchScrcpy = await settings.GetAsync("Startup.AutoLaunchScrcpy", AutomaticallyLaunchScrcpy, cancellationToken);
@@ -2326,6 +2472,13 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             HistogramUpdateMilliseconds,
             cancellationToken);
         SelectedNightMode = await settings.GetAsync("Display.NightMode", SelectedNightMode, cancellationToken);
+        string? savedWindowMode = await settings.GetAsync(
+            "Display.WindowMode",
+            SelectedWindowMode,
+            cancellationToken);
+        SelectedWindowMode = WindowModeOptions.Contains(savedWindowMode, StringComparer.Ordinal)
+            ? savedWindowMode!
+            : "Windowed fullscreen";
 
         ExposureSeconds = DefaultExposureSeconds;
         PlannedFrameCount = DefaultFrameCount;
@@ -2336,6 +2489,8 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _deviceMonitorOptions.RefreshInterval = TimeSpan.FromSeconds(
             Math.Clamp(StatusRefreshSeconds, 5, 300));
         _deviceMonitorOptions.AutoReconnect = AutomaticallyReconnect;
+        _photoSync.DestinationFolder = PhoneCaptureFolder;
+        _photoSync.Enabled = AutomaticallyImportPhonePhotos;
         try
         {
             _paths.SetScreenshotRoot(ScreenshotFolder);
@@ -2570,6 +2725,33 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 PreviewFps = status.FramesPerSecond;
                 PreviewError = status.Error;
             });
+
+    private void HandlePhonePhotoImported(object? sender, PhonePhotoImportedEventArgs args)
+    {
+        // Offer every imported capture to the stack run. The service ignores it
+        // unless stack mode is armed and the target has not been met, so this is
+        // safe to call unconditionally and keeps the arming decision in one place.
+        _ = _stackSession.Offer(args.LocalPath, DateTimeOffset.Now);
+
+        // Advance the unattended run only if this file genuinely completes the
+        // outstanding shutter press. The file's own write time is used rather
+        // than "now", because the sync poll can lag several seconds behind.
+        DateTimeOffset writtenAt;
+        try
+        {
+            writtenAt = File.Exists(args.LocalPath)
+                ? new DateTimeOffset(File.GetLastWriteTimeUtc(args.LocalPath), TimeSpan.Zero)
+                : DateTimeOffset.Now;
+        }
+        catch (IOException)
+        {
+            writtenAt = DateTimeOffset.Now;
+        }
+
+        _ = _autoCapture.NotifyFileImported(args.LocalPath, writtenAt);
+
+        Dispatch(() => StatusMessage = $"Phone photo saved to {args.LocalPath}");
+    }
 
     private void HandleTimerTick(object? sender, ExposureTimerTick tick) =>
         Dispatch(
@@ -2901,17 +3083,33 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             throw new InvalidOperationException("Enter the phone's Wi-Fi IP address and port.");
         }
 
-        if (!value.Contains(':', StringComparison.Ordinal))
+        Match endpointMatch = Regex.Match(
+            value,
+            @"(?<!\d)(?<address>(?:\d{1,3}\.){3}\d{1,3}):(?<port>\d{1,5})(?!\d)",
+            RegexOptions.CultureInvariant);
+        if (endpointMatch.Success &&
+            IPAddress.TryParse(endpointMatch.Groups["address"].Value, out IPAddress? address) &&
+            int.TryParse(
+                endpointMatch.Groups["port"].Value,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out int port) &&
+            port is >= 1 and <= 65535)
         {
-            if (!addDefaultPort)
-            {
-                throw new InvalidOperationException("Enter the pairing address exactly as shown on the phone, including its port.");
-            }
-
-            value += ":5555";
+            return $"{address}:{port}";
         }
 
-        return value;
+        if (!value.Contains(':', StringComparison.Ordinal) &&
+            addDefaultPort &&
+            IPAddress.TryParse(value, out IPAddress? defaultAddress))
+        {
+            return $"{defaultAddress}:5555";
+        }
+
+        throw new InvalidOperationException(
+            addDefaultPort
+                ? "Enter a valid phone IP address and port, for example 192.168.137.132:37123."
+                : "Enter the temporary pairing IP address and port exactly as shown on the phone.");
     }
 
     private void ValidateSessionInputs()
@@ -2963,6 +3161,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(ScreenshotFolder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(PhoneCaptureFolder);
         ArgumentException.ThrowIfNullOrWhiteSpace(SessionDataFolder);
     }
 
@@ -3093,4 +3292,326 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         return dispatcher.InvokeAsync(action, DispatcherPriority.Background).Task.Unwrap();
     }
+
+    // ---------------------------------------------------------------- stacking
+
+    /// <summary>
+    /// How many frames the run should collect before disarming itself. Zero means
+    /// keep collecting until stopped by hand.
+    /// </summary>
+    [ObservableProperty]
+    private int _stackTargetFrameCount = 30;
+
+    [ObservableProperty]
+    private bool _isStackArmed;
+
+    [ObservableProperty]
+    private int _stackCollectedCount;
+
+    [ObservableProperty]
+    private string _stackStatusText = "Stack mode is off.";
+
+    [ObservableProperty]
+    private string _stackFolderText = string.Empty;
+
+    [ObservableProperty]
+    private string _stackResultText = string.Empty;
+
+    [ObservableProperty]
+    private string _stackResultPath = string.Empty;
+
+    [ObservableProperty]
+    private bool _isStackRunning;
+
+    [ObservableProperty]
+    private string _sirilPath = string.Empty;
+
+    public ObservableCollection<string> StackFrameNames { get; } = [];
+
+    public double StackProgress => StackTargetFrameCount > 0
+        ? Math.Clamp((double)StackCollectedCount / StackTargetFrameCount, 0, 1)
+        : 0;
+
+    public string StackProgressText => StackTargetFrameCount > 0
+        ? $"{StackCollectedCount} / {StackTargetFrameCount} frames"
+        : $"{StackCollectedCount} frames";
+
+    public bool IsSirilAvailable => _stackEngine.IsAvailable;
+
+    [RelayCommand]
+    private void ToggleStackMode()
+    {
+        if (_stackSession.IsArmed)
+        {
+            _stackSession.Disarm();
+            IsStackArmed = false;
+            StackStatusText = $"Stack mode stopped with {StackCollectedCount} frames collected.";
+            return;
+        }
+
+        string root = PhoneCaptureFolder.Length > 0
+            ? PhoneCaptureFolder
+            : _paths.PhoneCaptureRoot;
+
+        try
+        {
+            string folder = _stackSession.Arm(root, StackTargetFrameCount);
+            StackFrameNames.Clear();
+            StackCollectedCount = 0;
+            StackResultText = string.Empty;
+            StackResultPath = string.Empty;
+            StackFolderText = folder;
+            IsStackArmed = true;
+            StackStatusText = StackTargetFrameCount > 0
+                ? $"Armed. Every photo you take now is collected, up to {StackTargetFrameCount} frames."
+                : "Armed. Every photo you take now is collected until you stop.";
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            StackStatusText = $"Could not start stack mode: {exception.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private async Task RunStackAsync()
+    {
+        if (IsStackRunning)
+        {
+            return;
+        }
+
+        _stackEngine.ExecutablePath = SirilPath;
+        OnPropertyChanged(nameof(IsSirilAvailable));
+
+        if (!_stackEngine.IsAvailable)
+        {
+            StackResultText =
+                "Siril was not found. Install it and set the siril-cli path in Settings.";
+            return;
+        }
+
+        string? extension = _stackSession.ResolveFrameExtension();
+        if (extension is null || _stackSession.SessionFolder.Length == 0)
+        {
+            StackResultText = "There are no collected frames to stack yet.";
+            return;
+        }
+
+        IsStackRunning = true;
+        StackResultText = "Stacking…";
+        try
+        {
+            var progress = new Progress<string>(line => StackResultText = line);
+            StackResult result = await _stackEngine
+                .StackAsync(
+                    new StackRequest(_stackSession.SessionFolder, extension),
+                    progress,
+                    _lifetimeCancellation.Token)
+                .ConfigureAwait(true);
+
+            StackResultText = result.Message;
+            StackResultPath = result.OutputPath ?? string.Empty;
+            if (!result.Succeeded)
+            {
+                _logger.LogWarning("Stacking failed: {Message}", result.Message);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            StackResultText = "Stacking was cancelled.";
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Stacking failed.");
+            StackResultText = $"Stacking failed: {exception.Message}";
+        }
+        finally
+        {
+            IsStackRunning = false;
+        }
+    }
+
+    [RelayCommand]
+    private void OpenStackFolder()
+    {
+        if (StackFolderText.Length == 0 || !Directory.Exists(StackFolderText))
+        {
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo(StackFolderText) { UseShellExecute = true });
+    }
+
+    private void HandleStackFrameAdded(object? sender, StackFrameAddedEventArgs args) =>
+        Dispatch(
+            () =>
+            {
+                StackCollectedCount = args.Collected;
+                StackFrameNames.Insert(0, Path.GetFileName(args.Frame.Path));
+                IsStackArmed = _stackSession.IsArmed;
+                OnPropertyChanged(nameof(StackProgress));
+                OnPropertyChanged(nameof(StackProgressText));
+                StackStatusText = _stackSession.IsArmed
+                    ? $"Collecting… {StackProgressText}"
+                    : $"Target reached: {StackProgressText}. Ready to stack.";
+            });
+
+    partial void OnStackTargetFrameCountChanged(int value)
+    {
+        OnPropertyChanged(nameof(StackProgress));
+        OnPropertyChanged(nameof(StackProgressText));
+        NotifyAutoCaptureDerived();
+    }
+
+    partial void OnStackCollectedCountChanged(int value)
+    {
+        OnPropertyChanged(nameof(StackProgress));
+        OnPropertyChanged(nameof(StackProgressText));
+    }
+
+    partial void OnSirilPathChanged(string value)
+    {
+        _stackEngine.ExecutablePath = value;
+        OnPropertyChanged(nameof(IsSirilAvailable));
+    }
+
+
+    // ------------------------------------------------------------ auto capture
+
+    /// <summary>
+    /// Seconds the phone needs after the exposure ends before it can take the
+    /// next frame: writing the file, and for long exposures Samsung's own noise
+    /// reduction pass.
+    /// </summary>
+    [ObservableProperty]
+    private double _autoCaptureWriteDelaySeconds = 4;
+
+    [ObservableProperty]
+    private bool _isAutoCaptureRunning;
+
+    [ObservableProperty]
+    private int _autoCaptureTriggeredCount;
+
+    [ObservableProperty]
+    private string _autoCaptureStatusText = "Auto capture is off.";
+
+    [ObservableProperty]
+    private string _autoCaptureTelemetryText = string.Empty;
+
+    [ObservableProperty]
+    private string _autoCaptureUnaccountedText = string.Empty;
+
+    /// <summary>
+    /// Seconds between shutter presses, derived from the exposure so the phone
+    /// is never asked for a frame it is still busy taking.
+    /// </summary>
+    /// <summary>
+    /// Typical seconds per frame, shown only to estimate how long a run takes.
+    /// The actual cadence follows frame arrival, not this figure.
+    /// </summary>
+    public double AutoCaptureIntervalSeconds =>
+        Math.Max(0, ExposureSeconds) + Math.Max(0, AutoCaptureWriteDelaySeconds);
+
+    public string AutoCaptureIntervalText =>
+        $"Waits for each photo to land  (~{AutoCaptureIntervalSeconds:F0}s per frame)";
+
+    public string AutoCaptureEstimatedRunText
+    {
+        get
+        {
+            if (StackTargetFrameCount <= 0)
+            {
+                return "Runs until stopped.";
+            }
+
+            TimeSpan total = TimeSpan.FromSeconds(AutoCaptureIntervalSeconds * StackTargetFrameCount);
+            return total.TotalHours >= 1
+                ? $"About {total.TotalHours:F1} h for {StackTargetFrameCount} frames."
+                : $"About {total.TotalMinutes:F0} min for {StackTargetFrameCount} frames.";
+        }
+    }
+
+    [RelayCommand]
+    private async Task ToggleAutoCaptureAsync()
+    {
+        if (_autoCapture.IsRunning)
+        {
+            await _autoCapture.StopAsync().ConfigureAwait(true);
+            IsAutoCaptureRunning = false;
+            AutoCaptureStatusText = $"Auto capture stopped after {AutoCaptureTriggeredCount} shots.";
+            return;
+        }
+
+        string? serial = SelectedAdbDevice?.Serial
+                         ?? _deviceMonitor.LastSnapshot?.Connection.SelectedDevice?.Serial;
+        if (string.IsNullOrWhiteSpace(serial))
+        {
+            AutoCaptureStatusText = "Select a device before starting auto capture.";
+            return;
+        }
+
+        AutoCaptureTriggeredCount = 0;
+        try
+        {
+            await _autoCapture
+                .StartAsync(
+                    new AutoCaptureOptions(
+                        serial,
+                        TimeSpan.FromSeconds(Math.Max(0, ExposureSeconds)),
+                        TimeSpan.FromSeconds(Math.Max(0, AutoCaptureWriteDelaySeconds)),
+                        StackTargetFrameCount),
+                    _lifetimeCancellation.Token)
+                .ConfigureAwait(true);
+
+            IsAutoCaptureRunning = true;
+            AutoCaptureStatusText =
+                "Running. Each shot fires once the previous photo lands. " +
+                "The camera app must be open and its volume key set to take pictures.";
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Auto capture could not start.");
+            AutoCaptureStatusText = $"Auto capture could not start: {exception.Message}";
+        }
+    }
+
+    private void HandleAutoCaptureTriggered(object? sender, AutoCaptureTick tick) =>
+        Dispatch(
+            () =>
+            {
+                AutoCaptureTriggeredCount = tick.Frame;
+                AutoCaptureStatusText = tick.Total > 0
+                    ? $"Shutter {tick.Frame} / {tick.Total} — waiting for the photo to land"
+                    : $"Shutter {tick.Frame} — waiting for the photo to land";
+            });
+
+    private void HandleAutoCaptureFinished(object? sender, AutoCaptureFinished args) =>
+        Dispatch(
+            () =>
+            {
+                IsAutoCaptureRunning = false;
+                AutoCaptureStatusText = args.Message;
+                AutoCaptureTelemetryText = args.Telemetry.Summary;
+            });
+
+    private void HandleAutoCaptureTelemetry(object? sender, AutoCaptureTelemetry telemetry) =>
+        Dispatch(
+            () =>
+            {
+                AutoCaptureTelemetryText = telemetry.Summary;
+                AutoCaptureUnaccountedText = telemetry.UnaccountedShutters > 0
+                    ? $"{telemetry.UnaccountedShutters} shutter command(s) produced no photo"
+                    : string.Empty;
+            });
+
+    partial void OnAutoCaptureWriteDelaySecondsChanged(double value) =>
+        NotifyAutoCaptureDerived();
+
+    private void NotifyAutoCaptureDerived()
+    {
+        OnPropertyChanged(nameof(AutoCaptureIntervalSeconds));
+        OnPropertyChanged(nameof(AutoCaptureIntervalText));
+        OnPropertyChanged(nameof(AutoCaptureEstimatedRunText));
+    }
+
 }

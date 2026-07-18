@@ -13,8 +13,12 @@ public interface IWindowMessageSink
 public sealed class NativeWindowMessageSink : IWindowMessageSink
 {
     public bool Post(nint windowHandle, TranslatedInputMessage message) =>
-        windowHandle != nint.Zero
-        && PostMessageW(windowHandle, message.Message, message.WParam, message.LParam);
+        windowHandle != nint.Zero &&
+        PostMessageW(
+            windowHandle,
+            message.Message,
+            message.WParam,
+            message.LParam);
 
     public bool TryClientToScreen(nint windowHandle, MappedPoint clientPoint, out MappedPoint screenPoint)
     {
@@ -26,7 +30,11 @@ public sealed class NativeWindowMessageSink : IWindowMessageSink
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool PostMessageW(nint windowHandle, uint message, nuint wParam, nint lParam);
+    private static extern bool PostMessageW(
+        nint windowHandle,
+        uint message,
+        nuint wParam,
+        nint lParam);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -176,6 +184,24 @@ public sealed class Win32InputForwarder : IInputForwarder
             }
 
             message = message with { LParam = InputMessageTranslator.PackPoint(screenPoint) };
+        }
+
+        if (input.Action is PointerAction.LeftButtonDown or
+            PointerAction.RightButtonDown or
+            PointerAction.MiddleButtonDown)
+        {
+            // SDL tracks whether the pointer has entered the client area before a
+            // button transition. Prime that state for the offscreen scrcpy window.
+            TranslatedInputMessage move = InputMessageTranslator.Translate(
+                new PointerInput(
+                    PointerAction.Move,
+                    input.Position,
+                    PointerButtons.None,
+                    input.Modifiers));
+            if (!_messageSink.Post(windowHandle, move))
+            {
+                return false;
+            }
         }
 
         return _messageSink.Post(windowHandle, message);

@@ -93,6 +93,39 @@ public sealed class AdbServiceTests
     }
 
     [Fact]
+    public async Task RestartWirelessDiscoveryAsync_RestartsDaemonWithOpenScreenMdns()
+    {
+        var runner = new RecordingProcessRunner();
+        var service = CreateService(runner);
+
+        await service.RestartWirelessDiscoveryAsync();
+
+        Assert.Equal(2, runner.Invocations.Count);
+        Assert.Equal(["kill-server"], runner.Invocations[0].Arguments);
+        Assert.Equal(["start-server"], runner.Invocations[1].Arguments);
+        Assert.Equal("1", runner.Invocations[1].EnvironmentVariables?["ADB_MDNS_OPENSCREEN"]);
+    }
+
+    [Fact]
+    public async Task ConnectWirelessAsync_RejectsAdbFailureReportedWithZeroExitCode()
+    {
+        var runner = new RecordingProcessRunner
+        {
+            RunResult = new ProcessExecutionResult(
+                0,
+                "failed to connect to 192.168.1.42:37121",
+                string.Empty,
+                TimeSpan.Zero),
+        };
+        var service = CreateService(runner);
+
+        AdbCommandException exception = await Assert.ThrowsAsync<AdbCommandException>(
+            () => service.ConnectWirelessAsync("192.168.1.42:37121"));
+
+        Assert.Contains("main Wireless debugging screen", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task PairWirelessAsync_ExplainsProtocolFaultAsAnUnreachableTemporaryAddress()
     {
         var runner = new RecordingProcessRunner

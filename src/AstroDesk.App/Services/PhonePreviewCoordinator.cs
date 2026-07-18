@@ -57,7 +57,16 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
     private readonly IWindowCaptureService _capture;
     private readonly IScrcpyService _scrcpy;
     private readonly ThrottledHistogramProcessor _histogram;
+    /// <summary>
+    /// Brightness multiplier applied to the preview in full red mode. Low enough
+    /// to stop the preview glowing in your face on a dark site, high enough to
+    /// still judge framing and focus.
+    /// </summary>
+    private const double FullRedPreviewDimFactor = 0.45;
+
     private readonly PreviewScreenshotWriter _screenshotWriter;
+    private readonly IPhonePhotoSyncService _photoSync;
+    private readonly IPhoneOrientationSessionService _orientation;
     private readonly ILogger<PhonePreviewCoordinator> _logger;
     private readonly object _latestSync = new();
     private byte[]? _latestRawPixels;
@@ -74,12 +83,16 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
         IScrcpyService scrcpy,
         ThrottledHistogramProcessor histogram,
         PreviewScreenshotWriter screenshotWriter,
+        IPhonePhotoSyncService photoSync,
+        IPhoneOrientationSessionService orientation,
         ILogger<PhonePreviewCoordinator> logger)
     {
         _capture = capture;
         _scrcpy = scrcpy;
         _histogram = histogram;
         _screenshotWriter = screenshotWriter;
+        _photoSync = photoSync;
+        _orientation = orientation;
         _logger = logger;
 
         _capture.FrameArrived += HandleFrameArrived;
@@ -136,26 +149,63 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
         ScrcpyLaunchOptions options,
         CancellationToken cancellationToken = default)
     {
-        ScrcpySession session = await _scrcpy.StartAsync(options, cancellationToken).ConfigureAwait(false);
-        await _capture.StartAsync(
-                session.WindowHandle,
-                new WindowCaptureOptions { FramesPerSecond = options.MaxFps is > 0 ? Math.Min(options.MaxFps.Value, 60) : 30 },
-                cancellationToken)
-            .ConfigureAwait(false);
-        PublishStatus(true, "Embedded phone preview running.");
-        return session;
+        if (!string.IsNullOrWhiteSpace(options.DeviceSerial))
+        {
+            await _orientation.EnterLandscapeAsync(options.DeviceSerial, cancellationToken).ConfigureAwait(false);
+        }
+
+        try
+        {
+            ScrcpySession session = await _scrcpy.StartAsync(options, cancellationToken).ConfigureAwait(false);
+            await _capture.StartAsync(
+                    session.WindowHandle,
+                    new WindowCaptureOptions { FramesPerSecond = options.MaxFps is > 0 ? Math.Min(options.MaxFps.Value, 60) : 30 },
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(session.Options.DeviceSerial))
+            {
+                await _photoSync.StartAsync(session.Options.DeviceSerial, cancellationToken).ConfigureAwait(false);
+            }
+
+            PublishStatus(true, "Embedded phone preview running.");
+            return session;
+        }
+        catch
+        {
+            await _photoSync.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            await _capture.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            await _scrcpy.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            await _orientation.RestoreAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
-        await _capture.StopAsync(cancellationToken).ConfigureAwait(false);
-        await _scrcpy.StopAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _photoSync.StopAsync(cancellationToken).ConfigureAwait(false);
+            await _capture.StopAsync(cancellationToken).ConfigureAwait(false);
+            await _scrcpy.StopAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            await _orientation.RestoreAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+
         PublishStatus(false, "Phone preview stopped.");
     }
 
     public async Task<ScrcpySession> ReconnectAsync(CancellationToken cancellationToken = default)
     {
+        await _photoSync.StopAsync(cancellationToken).ConfigureAwait(false);
         await _capture.StopAsync(cancellationToken).ConfigureAwait(false);
+        string? serial = _scrcpy.CurrentSession?.Options.DeviceSerial;
+        if (!string.IsNullOrWhiteSpace(serial))
+        {
+            await _orientation.EnterLandscapeAsync(serial, cancellationToken).ConfigureAwait(false);
+        }
+
         ScrcpySession session = await _scrcpy.ReconnectAsync(cancellationToken).ConfigureAwait(false);
         await _capture.StartAsync(
                 session.WindowHandle,
@@ -167,6 +217,11 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
                 },
                 cancellationToken)
             .ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(session.Options.DeviceSerial))
+        {
+            await _photoSync.StartAsync(session.Options.DeviceSerial, cancellationToken).ConfigureAwait(false);
+        }
+
         PublishStatus(true, "Embedded phone preview reconnected.");
         return session;
     }
@@ -252,7 +307,7 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
             : rawPixels;
         if (_displayMode == NightDisplayMode.FullRed)
         {
-            ApplyRedTint(displayedPixels, _latestWidth, _latestHeight, _latestStride);
+            ApplyPreviewDim(displayedPixels, _latestWidth, _latestHeight, _latestStride);
         }
 
         BitmapSource bitmap = BitmapSource.Create(
@@ -289,8 +344,12 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
     private void HandleHistogramReady(object? sender, HistogramResult result) =>
         HistogramReady?.Invoke(this, result);
 
-    private void HandleScrcpyCrashed(object? sender, ScrcpyCrashedEventArgs args) =>
+    private async void HandleScrcpyCrashed(object? sender, ScrcpyCrashedEventArgs args)
+    {
+        await _photoSync.StopAsync().ConfigureAwait(false);
+        await _orientation.RestoreAsync().ConfigureAwait(false);
         PublishStatus(false, "scrcpy stopped unexpectedly.", $"scrcpy exited with code {args.ExitCode}.");
+    }
 
     private void HandleScrcpyStateChanged(object? sender, ScrcpyStateChangedEventArgs args)
     {
@@ -303,7 +362,17 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
     private void PublishStatus(bool running, string message, string? error = null) =>
         StatusChanged?.Invoke(this, new PreviewStatus(running, _fps, message, error));
 
-    private static void ApplyRedTint(byte[] pixels, int width, int height, int stride)
+    /// <summary>
+    /// Scales every channel down while leaving hue and saturation intact.
+    /// </summary>
+    /// <remarks>
+    /// Full red mode drops blue and green from AstroDesk's own chrome, but the
+    /// preview is the one surface where colour has to stay truthful: it is the
+    /// frame being judged, and a red-tinted version cannot show a colour cast,
+    /// white balance error, or light pollution gradient. Dimming protects dark
+    /// adaptation, which is the actual goal, without destroying that signal.
+    /// </remarks>
+    private static void ApplyPreviewDim(byte[] pixels, int width, int height, int stride)
     {
         for (int row = 0; row < height; row++)
         {
@@ -311,17 +380,17 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
             for (int column = 0; column < width; column++)
             {
                 int index = rowStart + (column * 4);
-                byte blue = pixels[index];
-                byte green = pixels[index + 1];
-                byte red = pixels[index + 2];
-                byte luminance = (byte)Math.Clamp(
-                    (int)Math.Round((red * 0.299) + (green * 0.587) + (blue * 0.114)),
-                    0,
-                    255);
-                pixels[index] = 0;
-                pixels[index + 1] = 0;
-                pixels[index + 2] = luminance;
+                pixels[index] = Dim(pixels[index]);
+                pixels[index + 1] = Dim(pixels[index + 1]);
+                pixels[index + 2] = Dim(pixels[index + 2]);
+
+                // Alpha at index + 3 is left alone.
             }
         }
+
+        static byte Dim(byte channel) => (byte)Math.Clamp(
+            (int)Math.Round(channel * FullRedPreviewDimFactor, MidpointRounding.AwayFromZero),
+            0,
+            255);
     }
 }

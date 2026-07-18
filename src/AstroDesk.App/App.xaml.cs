@@ -3,6 +3,7 @@ using System.Windows.Threading;
 using AstroDesk.App.Configuration;
 using AstroDesk.App.Services;
 using AstroDesk.App.ViewModels;
+using AstroDesk.Stacking;
 using AstroDesk.Capture.Frames;
 using AstroDesk.Capture.Geometry;
 using AstroDesk.Capture.Histogram;
@@ -170,8 +171,10 @@ public partial class App : Application
         builder.Services.AddSingleton(
             new DeviceToolOptions
             {
-                AdbExecutablePath = Environment.GetEnvironmentVariable("ASTRODESK_ADB_PATH"),
-                ScrcpyExecutablePath = Environment.GetEnvironmentVariable("ASTRODESK_SCRCPY_PATH"),
+                AdbExecutablePath = Environment.GetEnvironmentVariable("ASTRODESK_ADB_PATH")
+                                    ?? BundledTools.FindAdb(),
+                ScrcpyExecutablePath = Environment.GetEnvironmentVariable("ASTRODESK_SCRCPY_PATH")
+                                       ?? BundledTools.FindScrcpy(),
             });
         builder.Services.AddSingleton(
             new DeviceMonitorOptions
@@ -180,6 +183,17 @@ public partial class App : Application
                     Math.Clamp(appOptions.StatusRefreshSeconds, 5, 300)),
                 AutoReconnect = appOptions.AutomaticallyReconnect,
                 ReconnectCooldown = TimeSpan.FromSeconds(30),
+            });
+        builder.Services.AddSingleton<IStackSessionService, StackSessionService>();
+        builder.Services.AddSingleton<IAutoCaptureService, AutoCaptureService>();
+        builder.Services.AddSingleton<IStackEngine>(
+            provider => new SirilStackEngine(
+                provider.GetRequiredService<IProcessRunner>(),
+                provider.GetRequiredService<ILogger<SirilStackEngine>>())
+            {
+                ExecutablePath = Environment.GetEnvironmentVariable("ASTRODESK_SIRIL_PATH")
+                                 ?? BundledTools.FindSirilCli()
+                                 ?? string.Empty,
             });
         builder.Services.AddSingleton<IExecutableLocator, ExecutableLocator>();
         builder.Services.AddSingleton<IProcessRunner, ProcessRunner>();
@@ -212,6 +226,8 @@ public partial class App : Application
         builder.Services.AddSingleton<HistogramAnalyzer>();
         builder.Services.AddSingleton<ThrottledHistogramProcessor>();
         builder.Services.AddSingleton<PreviewScreenshotWriter>();
+        builder.Services.AddSingleton<IPhonePhotoSyncService, PhonePhotoSyncService>();
+        builder.Services.AddSingleton<IPhoneOrientationSessionService, PhoneOrientationSessionService>();
 
         builder.Services.AddSingleton<INightModeService, NightModeService>();
         builder.Services.AddSingleton<IExposureTimerService, ExposureTimerService>();

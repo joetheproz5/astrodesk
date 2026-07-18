@@ -34,9 +34,15 @@ public sealed class AspectRatioDecorator : Decorator
         Size fittedSize = Fit(constraint, AspectRatio, Child.DesiredSize);
         Child.Measure(fittedSize);
 
-        return new Size(
-            double.IsInfinity(constraint.Width) ? Child.DesiredSize.Width : constraint.Width,
-            double.IsInfinity(constraint.Height) ? Child.DesiredSize.Height : constraint.Height);
+        double desiredWidth = double.IsInfinity(constraint.Width) ||
+                              HorizontalAlignment != System.Windows.HorizontalAlignment.Stretch
+            ? fittedSize.Width
+            : constraint.Width;
+        double desiredHeight = double.IsInfinity(constraint.Height) ||
+                               VerticalAlignment != System.Windows.VerticalAlignment.Stretch
+            ? fittedSize.Height
+            : constraint.Height;
+        return new Size(desiredWidth, desiredHeight);
     }
 
     protected override Size ArrangeOverride(Size arrangeSize)

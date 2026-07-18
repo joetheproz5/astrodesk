@@ -14,6 +14,11 @@ public sealed class AppPaths
         SessionRoot = Path.Combine(DataRoot, "Sessions");
         LogRoot = Path.Combine(DataRoot, "Logs");
         ScreenshotRoot = Path.Combine(DataRoot, "Preview Screenshots");
+        string pictures = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+        PhoneCaptureRoot = Path.Combine(
+            string.IsNullOrWhiteSpace(pictures) ? DataRoot : pictures,
+            "AstroDesk",
+            "Phone Captures");
     }
 
     public string DataRoot { get; }
@@ -25,6 +30,8 @@ public sealed class AppPaths
     public string LogRoot { get; }
 
     public string ScreenshotRoot { get; private set; }
+
+    public string PhoneCaptureRoot { get; private set; }
 
     public void SetSessionRoot(string path)
     {
@@ -42,11 +49,20 @@ public sealed class AppPaths
         ScreenshotRoot = fullPath;
     }
 
+    public void SetPhoneCaptureRoot(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        string fullPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(path));
+        Directory.CreateDirectory(fullPath);
+        PhoneCaptureRoot = fullPath;
+    }
+
     public void EnsureCreated()
     {
         Directory.CreateDirectory(DataRoot);
         Directory.CreateDirectory(SessionRoot);
         Directory.CreateDirectory(LogRoot);
         Directory.CreateDirectory(ScreenshotRoot);
+        Directory.CreateDirectory(PhoneCaptureRoot);
     }
 }
