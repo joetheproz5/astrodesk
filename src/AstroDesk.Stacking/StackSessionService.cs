@@ -195,12 +195,30 @@ public sealed class StackSessionService(ILogger<StackSessionService>? logger = n
         string[] byPreference = [".dng", ".raw", ".tif", ".tiff", ".png", ".jpg", ".jpeg"];
         foreach (string candidate in byPreference)
         {
-            if (frames.Any(frame =>
-                    Path.GetExtension(frame.Path)
-                        .Equals(candidate, StringComparison.OrdinalIgnoreCase)))
+            StackFrame[] matching = [.. frames.Where(frame =>
+                Path.GetExtension(frame.Path)
+                    .Equals(candidate, StringComparison.OrdinalIgnoreCase))];
+
+            if (matching.Length == 0)
             {
-                return candidate.TrimStart('.');
+                continue;
             }
+
+            // Preferring RAW is only right if the engine can read it. Samsung's
+            // Expert RAW writes JPEG XL sensor data, which Siril's libraw
+            // rejects: it converts none of them and the run stacks nothing.
+            // Falling back to the JPEG companion loses depth but produces a
+            // result, which is strictly better than a silent failure.
+            if (candidate is ".dng" or ".raw" &&
+                !matching.Any(frame => DngPreviewExtractor.IsRawDataReadable(frame.Path)))
+            {
+                _logger.LogInformation(
+                    "Skipping {Extension}: the sensor data is in a format the stacker cannot read.",
+                    candidate);
+                continue;
+            }
+
+            return candidate.TrimStart('.');
         }
 
         return null;

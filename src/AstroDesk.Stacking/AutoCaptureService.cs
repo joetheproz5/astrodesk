@@ -11,11 +11,17 @@ namespace AstroDesk.Stacking;
 /// the settle pause only; it never decides when the next shot is due.
 /// </param>
 /// <param name="FrameCount">Frames to trigger; zero means keep going until stopped.</param>
+/// <param name="FirstFrameTimeout">
+/// Overrides the computed first-frame watchdog. Production leaves this null and
+/// takes the generous default; tests set it short so the watchdog path can be
+/// exercised without waiting minutes.
+/// </param>
 public sealed record AutoCaptureOptions(
     string Serial,
     TimeSpan Exposure,
     TimeSpan WriteDelay,
-    int FrameCount);
+    int FrameCount,
+    TimeSpan? FirstFrameTimeout = null);
 
 /// <summary>
 /// Counters for one auto-capture run.
@@ -35,9 +41,12 @@ public sealed record AutoCaptureTelemetry(
     int DuplicatesIgnored,
     int IgnoredNotCapture,
     int IgnoredPredatingShutter,
-    int Timeouts)
+    int Timeouts,
+    TimeSpan LastLatency,
+    TimeSpan TypicalLatency)
 {
-    public static AutoCaptureTelemetry Empty { get; } = new(0, 0, 0, 0, 0, 0, 0, 0, 0);
+    public static AutoCaptureTelemetry Empty { get; } =
+        new(0, 0, 0, 0, 0, 0, 0, 0, 0, TimeSpan.Zero, TimeSpan.Zero);
 
     /// <summary>
     /// Shutter commands that were sent but never produced a capture.
@@ -46,7 +55,8 @@ public sealed record AutoCaptureTelemetry(
 
     public string Summary =>
         $"requested {ShotsRequested} · sent {ShutterCommandsSent} · captures {CapturesCounted} · " +
-        $"files {FilesImported} · duplicates {DuplicatesIgnored} · timeouts {Timeouts}";
+        $"files {FilesImported} · duplicates {DuplicatesIgnored} · timeouts {Timeouts}" +
+        (TypicalLatency > TimeSpan.Zero ? $" · {TypicalLatency.TotalSeconds:F0}s/frame" : string.Empty);
 }
 
 public sealed class AutoCaptureTick(int frame, int total) : EventArgs
@@ -120,6 +130,8 @@ public sealed class AutoCaptureService : IAutoCaptureService
     public static readonly TimeSpan MinimumSettleDelay = TimeSpan.FromMilliseconds(750);
 
     private readonly IAdbInputService _input;
+    private readonly ICaptureFlushPrompt? _flushPrompt;
+    private readonly IScreenWakeGuard? _wakeGuard;
     private readonly ILogger<AutoCaptureService> _logger;
     private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private readonly CaptureCorrelator _correlator = new();
@@ -137,9 +149,13 @@ public sealed class AutoCaptureService : IAutoCaptureService
 
     public AutoCaptureService(
         IAdbInputService input,
+        ICaptureFlushPrompt? flushPrompt = null,
+        IScreenWakeGuard? wakeGuard = null,
         ILogger<AutoCaptureService>? logger = null)
     {
         _input = input ?? throw new ArgumentNullException(nameof(input));
+        _flushPrompt = flushPrompt;
+        _wakeGuard = wakeGuard;
         _logger = logger ?? NullLogger<AutoCaptureService>.Instance;
     }
 
@@ -162,15 +178,55 @@ public sealed class AutoCaptureService : IAutoCaptureService
         }
     }
 
-    public static TimeSpan CalculateTimeout(TimeSpan exposure, TimeSpan writeDelay)
+    /// <summary>
+    /// Timeout for the very first frame, before any latency has been observed.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately generous. The old estimate of twice the exposure plus the
+    /// write gave 63s on default settings, but Expert RAW measured about 120s
+    /// from shutter to file on an S23 Ultra: its multi-frame astro processing
+    /// dwarfs the exposure and is not a "write" in any meaningful sense.
+    /// Aborting a healthy run is far worse than waiting a little longer for a
+    /// genuinely dead one, and only the first frame pays this cost.
+    /// </remarks>
+    public static TimeSpan CalculateBootstrapTimeout(TimeSpan exposure, TimeSpan writeDelay)
     {
         TimeSpan expected =
             (exposure > TimeSpan.Zero ? exposure : TimeSpan.Zero) +
             (writeDelay > TimeSpan.Zero ? writeDelay : TimeSpan.Zero);
 
-        TimeSpan timeout = expected + expected + TimeSpan.FromSeconds(15);
-        return timeout < TimeSpan.FromSeconds(20) ? TimeSpan.FromSeconds(20) : timeout;
+        TimeSpan scaled = expected + expected + TimeSpan.FromSeconds(30);
+        return scaled < MinimumBootstrapTimeout ? MinimumBootstrapTimeout : scaled;
     }
+
+    /// <summary>
+    /// Floor for the first frame, sized so Expert RAW's astro processing fits
+    /// comfortably with room to spare.
+    /// </summary>
+    public static readonly TimeSpan MinimumBootstrapTimeout = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Timeout for subsequent frames, derived from how long frames actually took.
+    /// </summary>
+    /// <remarks>
+    /// Uses the slowest observation rather than the mean: latency varies with
+    /// thermal state and file size, and sizing to the average would abort on any
+    /// frame slower than typical. The multiplier then absorbs further drift.
+    /// </remarks>
+    public static TimeSpan CalculateAdaptiveTimeout(IReadOnlyCollection<TimeSpan> observed)
+    {
+        ArgumentNullException.ThrowIfNull(observed);
+        if (observed.Count == 0)
+        {
+            return MinimumBootstrapTimeout;
+        }
+
+        TimeSpan slowest = observed.Max();
+        TimeSpan scaled = slowest + slowest + TimeSpan.FromSeconds(30);
+        return scaled < MinimumAdaptiveTimeout ? MinimumAdaptiveTimeout : scaled;
+    }
+
+    public static readonly TimeSpan MinimumAdaptiveTimeout = TimeSpan.FromSeconds(45);
 
     public static TimeSpan CalculateSettleDelay(TimeSpan writeDelay)
     {
@@ -300,17 +356,28 @@ public sealed class AutoCaptureService : IAutoCaptureService
 
     private async Task RunAsync(AutoCaptureOptions options, CancellationToken cancellationToken)
     {
-        TimeSpan timeout = CalculateTimeout(options.Exposure, options.WriteDelay);
+        // The first frame has no history to size a timeout from; later frames
+        // use what the phone actually did rather than what we guessed.
+        TimeSpan timeout = options.FirstFrameTimeout
+                           ?? CalculateBootstrapTimeout(options.Exposure, options.WriteDelay);
         TimeSpan settle = CalculateSettleDelay(options.WriteDelay);
+        List<TimeSpan> latencies = [];
 
         _logger.LogInformation(
-            "Auto capture started: {Frames} frames, advancing on capture arrival (timeout {Timeout}).",
+            "Auto capture started: {Frames} frames, advancing on capture arrival "
+            + "(first-frame timeout {Timeout}).",
             options.FrameCount == 0 ? "unlimited" : options.FrameCount.ToString(),
             timeout);
 
         int frame = 0;
         bool timedOut = false;
         string message;
+
+        // The shutter only reaches the camera while the display is on, and the
+        // phone's own timeout is routinely shorter than a single frame takes.
+        ScreenWakeState? wake = _wakeGuard is null
+            ? null
+            : await _wakeGuard.AcquireAsync(options.Serial, cancellationToken).ConfigureAwait(false);
 
         try
         {
@@ -324,6 +391,15 @@ public sealed class AutoCaptureService : IAutoCaptureService
                 // Re-check immediately before issuing the command so a stop during
                 // the settle delay cannot be followed by another press.
                 cancellationToken.ThrowIfCancellationRequested();
+
+                // Self-heal: if the display slept anyway, waking here is the
+                // difference between the run continuing and dying silently.
+                if (_wakeGuard is not null)
+                {
+                    await _wakeGuard
+                        .EnsureAwakeAsync(options.Serial, cancellationToken)
+                        .ConfigureAwait(false);
+                }
 
                 DateTimeOffset pressedAt = DateTimeOffset.Now;
                 try
@@ -364,9 +440,27 @@ public sealed class AutoCaptureService : IAutoCaptureService
                     break;
                 }
 
+                // Expert RAW defers finishing a capture until something asks for
+                // it; without this a frame takes about 95s instead of under 30.
+                if (_flushPrompt is not null)
+                {
+                    await _flushPrompt
+                        .PromptAsync(options.Serial, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+
                 bool arrived = await _captureArrived
                     .WaitAsync(timeout, cancellationToken)
                     .ConfigureAwait(false);
+
+                if (_flushPrompt is not null)
+                {
+                    // Leave the review screen, or the next volume-key press goes
+                    // to the viewer rather than the shutter.
+                    await _flushPrompt
+                        .DismissAsync(options.Serial, cancellationToken)
+                        .ConfigureAwait(false);
+                }
 
                 if (!arrived)
                 {
@@ -375,12 +469,31 @@ public sealed class AutoCaptureService : IAutoCaptureService
                     break;
                 }
 
+                TimeSpan latency = DateTimeOffset.Now - pressedAt;
+                latencies.Add(latency);
+                timeout = options.FirstFrameTimeout is { } bound
+                    ? bound
+                    : CalculateAdaptiveTimeout(latencies);
+
+                TimeSpan typical = latencies.Max();
+                Mutate(current => current with
+                {
+                    LastLatency = latency,
+                    TypicalLatency = typical,
+                });
+
+                _logger.LogDebug(
+                    "Frame {Frame} took {Latency}; next timeout {Timeout}.",
+                    frame,
+                    latency,
+                    timeout);
+
                 await Task.Delay(settle, cancellationToken).ConfigureAwait(false);
             }
 
             message = timedOut
                 ? $"Stopped after {frame}: no photo arrived within {timeout.TotalSeconds:F0}s. " +
-                  "Check that the camera app is open and its volume key is set to take pictures."
+                  "Check that the camera app is in front and its volume key is set to take pictures."
                 : $"Auto capture finished after {frame} shots.";
         }
         catch (OperationCanceledException)
@@ -391,6 +504,13 @@ public sealed class AutoCaptureService : IAutoCaptureService
         {
             _logger.LogWarning(exception, "Auto capture stopped after an error.");
             message = $"Auto capture failed: {exception.Message}";
+        }
+
+        if (wake is not null && _wakeGuard is not null)
+        {
+            // Restore the phone's own timeout however the run ended, including
+            // cancellation, so the setting is never left changed behind the user.
+            await _wakeGuard.ReleaseAsync(wake, CancellationToken.None).ConfigureAwait(false);
         }
 
         Finish(frame, timedOut, message);

@@ -448,18 +448,17 @@
                                                                       DebugText="{Binding DebugOverlayText}"
                                                                       Rotation="{Binding PreviewRotation}"
                                                                       ScrcpyClientSize="{Binding ScrcpyClientSize}" />
-                                        <!-- NativeScrcpyHost is an HwndHost, and WPF cannot draw over a
-                                             native child window. Anything the preview control renders —
-                                             every framing overlay, the loupe, the debug text — sits
-                                             underneath this and is invisible while it is shown. So the
-                                             host is collapsed in overlay mode, revealing the captured
-                                             preview beneath, which draws the same frames in WPF and can
-                                             therefore be drawn on top of. -->
-                                        <Grid Visibility="{Binding IsChecked, ElementName=OverlayModeToggle, Converter={StaticResource InverseBoolToVisibility}}">
-                                            <controls:NativeScrcpyHost SourceWindowHandle="{Binding MainScrcpyWindowHandle}"
-                                                                       Visibility="{Binding ShowWirelessPanel, Converter={StaticResource InverseBoolToVisibility}}"
-                                                                       controls:TouchScrollBehavior.IsExcluded="True" />
-                                        </Grid>
+                                        <!-- NativeScrcpyHost is an HwndHost holding scrcpy's own window,
+                                             reparented into the layout. Do not wrap this in a container
+                                             whose Visibility toggles: collapsing it runs DestroyWindowCore,
+                                             which destroys the reparented window and takes the scrcpy
+                                             process down with it. WPF also cannot draw over a native child
+                                             window, so framing overlays are invisible while this is shown;
+                                             showing them requires parking scrcpy's window off-screen and
+                                             falling back to the captured-frame preview, not hiding the host. -->
+                                        <controls:NativeScrcpyHost SourceWindowHandle="{Binding MainScrcpyWindowHandle}"
+                                                                   Visibility="{Binding ShowWirelessPanel, Converter={StaticResource InverseBoolToVisibility}}"
+                                                                   controls:TouchScrollBehavior.IsExcluded="True" />
                                     </Grid>
                                 </Border>
                             </controls:AspectRatioDecorator>
@@ -488,17 +487,6 @@
                                         <CheckBox Content="Loupe" IsChecked="{Binding FocusMagnifier}" FontSize="11.5" VerticalAlignment="Center" Margin="0,0,12,0" />
                                     </WrapPanel>
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                                        <!-- Overlays can only be drawn on the captured preview, never on
-                                             the embedded native window. Direct mode keeps scrcpy's own
-                                             window for the lowest-latency touch; overlay mode swaps to
-                                             the captured frames so the guides become visible. -->
-                                        <ToggleButton x:Name="OverlayModeToggle"
-                                                      Content="Overlay mode"
-                                                      Style="{StaticResource PanelToggleButton}"
-                                                      MinHeight="28"
-                                                      Padding="10,3"
-                                                      Margin="0,0,9,0"
-                                                      ToolTip="Show framing guides. Direct mode gives lower-latency touch but cannot display overlays." />
                                         <Button Content="Hide all" Command="{Binding HideAllOverlaysCommand}" Style="{StaticResource PanelButton}" MinHeight="28" Padding="9,3" />
                                     </StackPanel>
                                 </Grid>
@@ -1625,6 +1613,17 @@
                                  from the exposure, so a long run does not need a human
                                  pressing the button every 20 seconds. -->
                             <TextBlock Text="AUTO CAPTURE" Style="{StaticResource RailHeader}" />
+                            <TextBlock Text="Camera app" Style="{StaticResource RailLabel}" HorizontalAlignment="Left" Margin="0,0,0,4" />
+                            <ComboBox ItemsSource="{Binding CameraApps}"
+                                      SelectedItem="{Binding SelectedCameraApp}"
+                                      MinHeight="32"
+                                      FontSize="12"
+                                      Margin="0,0,0,3"
+                                      ToolTip="Which app to shoot with. Captures are collected from the folder it writes to." />
+                            <TextBlock Text="{Binding CameraAppFolderText}"
+                                       Style="{StaticResource TelemetrySub}"
+                                       FontSize="10"
+                                       Margin="0,0,0,8" />
                             <TextBlock Text="Write delay (s)" Style="{StaticResource RailLabel}" HorizontalAlignment="Left" Margin="0,0,0,4" />
                             <TextBox Text="{Binding AutoCaptureWriteDelaySeconds, UpdateSourceTrigger=PropertyChanged}"
                                      MinHeight="32"
@@ -1696,6 +1695,80 @@
                             </Grid.RowDefinitions>
 
                             <StackPanel>
+                                <!-- The finished stack, once one exists. Shown above the
+                                     live view because it supersedes it. -->
+                                <StackPanel Visibility="{Binding HasStackResult, Converter={StaticResource BoolToVisibility}}">
+                                    <DockPanel LastChildFill="False" Margin="0,0,0,7">
+                                        <TextBlock Text="STACKED RESULT" Style="{StaticResource RailHeader}" Margin="0" />
+                                        <Button DockPanel.Dock="Right"
+                                                Content="Open folder"
+                                                Command="{Binding OpenStackFolderCommand}"
+                                                Style="{StaticResource PanelButton}"
+                                                MinHeight="24"
+                                                Padding="8,2"
+                                                FontSize="11" />
+                                    </DockPanel>
+                                    <Border Background="{DynamicResource PreviewBackgroundBrush}"
+                                            BorderBrush="{DynamicResource AccentBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="2"
+                                            Height="300"
+                                            Margin="0,0,0,4">
+                                        <Image Source="{Binding StackResultImage}"
+                                               Stretch="Uniform"
+                                               RenderOptions.BitmapScalingMode="HighQuality" />
+                                    </Border>
+                                    <TextBlock Text="{Binding StackResultPath}"
+                                               Style="{StaticResource TelemetrySub}"
+                                               FontSize="10"
+                                               TextWrapping="Wrap"
+                                               TextTrimming="None"
+                                               Margin="0,0,0,14" />
+                                </StackPanel>
+
+                                <DockPanel LastChildFill="False" Margin="0,0,0,7">
+                                    <TextBlock Text="LIVE STACK" Style="{StaticResource RailHeader}" Margin="0" />
+                                    <TextBlock DockPanel.Dock="Right"
+                                               Text="{Binding LivePreviewDriftText}"
+                                               Style="{StaticResource TelemetrySub}"
+                                               FontSize="10"
+                                               Margin="10,0,0,0" />
+                                    <TextBlock DockPanel.Dock="Right"
+                                               Text="{Binding LivePreviewFramesText}"
+                                               Style="{StaticResource TelemetrySub}"
+                                               FontSize="10" />
+                                </DockPanel>
+                                <Border Background="{DynamicResource PreviewBackgroundBrush}"
+                                        BorderBrush="{DynamicResource PanelBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="2"
+                                        Height="240"
+                                        Margin="0,0,0,6"
+                                        Visibility="{Binding HasLivePreview, Converter={StaticResource BoolToVisibility}}">
+                                    <Image Source="{Binding LivePreviewImage}"
+                                           Stretch="Uniform"
+                                           RenderOptions.BitmapScalingMode="HighQuality" />
+                                </Border>
+                                <Border Background="{DynamicResource PanelRaisedBrush}"
+                                        CornerRadius="2"
+                                        Height="240"
+                                        Margin="0,0,0,6"
+                                        Visibility="{Binding HasLivePreview, Converter={StaticResource InverseBoolToVisibility}}">
+                                    <TextBlock Text="The running stack appears here once frames start arriving."
+                                               Style="{StaticResource MutedText}"
+                                               FontSize="11.5"
+                                               TextAlignment="Center"
+                                               TextWrapping="Wrap"
+                                               MaxWidth="260"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center" />
+                                </Border>
+                                <CheckBox Content="Update preview while capturing"
+                                          IsChecked="{Binding IsLivePreviewEnabled}"
+                                          FontSize="11.5"
+                                          MinHeight="28"
+                                          Margin="0,0,0,12" />
+
                                 <TextBlock Text="COLLECTED FRAMES" Style="{StaticResource RailHeader}" />
                                 <Border Background="{DynamicResource PanelRaisedBrush}"
                                         BorderBrush="{DynamicResource WarningBrush}"
@@ -1714,18 +1787,60 @@
                                 </Border>
                             </StackPanel>
 
+                            <!-- Thumbnails rather than filenames: a glance tells you
+                                 whether the frames are usable, which a list of
+                                 timestamps never can. -->
                             <ListBox Grid.Row="1"
                                      ItemsSource="{Binding StackFrameNames}"
                                      Background="Transparent"
-                                     BorderThickness="0">
+                                     BorderThickness="0"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel Orientation="Horizontal" />
+                                    </ItemsPanelTemplate>
+                                </ListBox.ItemsPanel>
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
-                                        <TextBlock Text="{Binding}"
-                                                   FontFamily="Cascadia Mono, Consolas"
-                                                   FontSize="11.5"
-                                                   TextTrimming="CharacterEllipsis" />
+                                        <Border Background="{DynamicResource PanelRaisedBrush}"
+                                                BorderBrush="{DynamicResource PanelBorderBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="2"
+                                                Width="132"
+                                                Margin="0,0,8,8"
+                                                Padding="3">
+                                            <StackPanel>
+                                                <Grid Height="86">
+                                                    <Border Background="{DynamicResource PreviewBackgroundBrush}"
+                                                            CornerRadius="1" />
+                                                    <Image Source="{Binding Thumbnail}"
+                                                           Stretch="UniformToFill"
+                                                           RenderOptions.BitmapScalingMode="HighQuality" />
+                                                    <TextBlock Text="RAW"
+                                                               Style="{StaticResource TelemetrySub}"
+                                                               FontSize="10"
+                                                               HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center"
+                                                               Visibility="{Binding HasThumbnail, Converter={StaticResource InverseBoolToVisibility}}" />
+                                                </Grid>
+                                                <TextBlock Text="{Binding FileName}"
+                                                           Style="{StaticResource TelemetrySub}"
+                                                           FontSize="9.5"
+                                                           Margin="0,3,0,0"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip="{Binding FileName}" />
+                                            </StackPanel>
+                                        </Border>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="Margin" Value="0" />
+                                        <Setter Property="Background" Value="Transparent" />
+                                        <Setter Property="BorderThickness" Value="0" />
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
                             </ListBox>
                         </Grid>
                     </Border>

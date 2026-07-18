@@ -66,7 +66,6 @@ public sealed record StackRequest(
 /// Outcome of a stacking run.
 /// </summary>
 /// <param name="Succeeded">True when Siril produced an output image.</param>
-/// <param name="OutputPath">Path to the stacked image, when one was produced.</param>
 /// <param name="FramesStacked">
 /// Number of frames Siril actually integrated. Registration discards frames it
 /// cannot solve, so this is routinely lower than the number captured and is the
@@ -74,12 +73,21 @@ public sealed record StackRequest(
 /// </param>
 /// <param name="Message">Human-readable summary, including the failure reason.</param>
 /// <param name="Log">Full Siril output, kept for diagnosis.</param>
+/// <param name="OutputPath">
+/// The stacked master. This is linear FITS, which carries the real data but
+/// which nothing on Windows can display.
+/// </param>
+/// <param name="PreviewPath">
+/// A stretched TIFF rendition of the same stack, written so the result can
+/// actually be looked at without opening Siril.
+/// </param>
 public sealed record StackResult(
     bool Succeeded,
     string? OutputPath,
     int FramesStacked,
     string Message,
-    string Log);
+    string Log,
+    string? PreviewPath = null);
 
 /// <summary>
 /// Runs the external stacking engine.

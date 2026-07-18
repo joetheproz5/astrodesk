@@ -30,6 +30,7 @@ public sealed class PhonePreviewCoordinatorTests
             new PreviewScreenshotWriter(),
             new FakePhonePhotoSyncService(),
             new FakePhoneOrientationSessionService(),
+            new FakeScrcpyWindowManager(),
             NullLogger<PhonePreviewCoordinator>.Instance);
         List<byte[]> renderedPixels = [];
         coordinator.FrameReady += (_, frame) =>
@@ -173,6 +174,8 @@ public sealed class PhonePreviewCoordinatorTests
 
         public string DestinationFolder { get; set; } = string.Empty;
 
+        public string RemoteFolder { get; set; } = string.Empty;
+
         public Task StartAsync(string serial, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 
@@ -192,4 +195,22 @@ public sealed class PhonePreviewCoordinatorTests
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
+
+    private sealed class FakeScrcpyWindowManager : IScrcpyWindowManager
+    {
+        public Task<nint> FindWindowAsync(
+            string exactTitle,
+            int processId,
+            TimeSpan timeout,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(nint.Zero);
+
+        public WindowPresentationState HideOffscreenWithoutMinimizing(nint windowHandle) =>
+            new(windowHandle, default, nint.Zero);
+
+        public void Restore(WindowPresentationState state)
+        {
+        }
+    }
+
 }

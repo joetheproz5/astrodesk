@@ -57,6 +57,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private readonly IStackSessionService _stackSession;
     private readonly IStackEngine _stackEngine;
     private readonly IAutoCaptureService _autoCapture;
+    private readonly ICameraForegroundService _cameraForeground;
+    private readonly ILivePreviewStackCoordinator _livePreview;
+    private readonly ILivePreviewRenderer _livePreviewRenderer;
     private readonly ILogger<MainWindowViewModel> _logger;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private readonly DispatcherTimer _elapsedTimer;
@@ -99,6 +102,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         IStackSessionService stackSession,
         IStackEngine stackEngine,
         IAutoCaptureService autoCapture,
+        ICameraForegroundService cameraForeground,
+        ILivePreviewStackCoordinator livePreview,
+        ILivePreviewRenderer livePreviewRenderer,
         ILogger<MainWindowViewModel> logger)
     {
         _scopeFactory = scopeFactory;
@@ -122,7 +128,11 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _stackSession = stackSession;
         _stackEngine = stackEngine;
         _autoCapture = autoCapture;
+        _cameraForeground = cameraForeground;
+        _livePreview = livePreview;
+        _livePreviewRenderer = livePreviewRenderer;
         _stackSession.FrameAdded += HandleStackFrameAdded;
+        _livePreview.Updated += HandleLivePreviewUpdated;
         _autoCapture.Triggered += HandleAutoCaptureTriggered;
         _autoCapture.Finished += HandleAutoCaptureFinished;
         _autoCapture.TelemetryChanged += HandleAutoCaptureTelemetry;
@@ -744,6 +754,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             _preview.HistogramReady += HandleHistogram;
             _preview.StatusChanged += HandlePreviewStatus;
             _photoSync.PhotoImported += HandlePhonePhotoImported;
+            _preview.WindowHandleChanged += HandlePreviewWindowHandleChanged;
             _deviceMonitor.SnapshotChanged += HandleDeviceSnapshot;
             _exposureTimer.Tick += HandleTimerTick;
             subscribed = true;
@@ -806,6 +817,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _preview.HistogramReady -= HandleHistogram;
         _preview.StatusChanged -= HandlePreviewStatus;
         _photoSync.PhotoImported -= HandlePhonePhotoImported;
+        _preview.WindowHandleChanged -= HandlePreviewWindowHandleChanged;
         _deviceMonitor.SnapshotChanged -= HandleDeviceSnapshot;
         _exposureTimer.Tick -= HandleTimerTick;
 
@@ -2490,6 +2502,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             Math.Clamp(StatusRefreshSeconds, 5, 300));
         _deviceMonitorOptions.AutoReconnect = AutomaticallyReconnect;
         _photoSync.DestinationFolder = PhoneCaptureFolder;
+        _photoSync.RemoteFolder = SelectedCameraApp.RemoteFolder;
         _photoSync.Enabled = AutomaticallyImportPhonePhotos;
         try
         {
@@ -2724,6 +2737,18 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 PreviewStatus = status.Message;
                 PreviewFps = status.FramesPerSecond;
                 PreviewError = status.Error;
+            });
+
+    private void HandlePreviewWindowHandleChanged(object? sender, nint handle) =>
+        Dispatch(
+            () =>
+            {
+                // The embedded host must follow the new window; leaving it bound
+                // to the destroyed one shows a permanently black preview.
+                // MainScrcpyWindowHandle is computed from this, and its own
+                // change notification is raised by the generated setter.
+                ScrcpyWindowHandle = handle;
+                StatusMessage = "Phone preview reattached.";
             });
 
     private void HandlePhonePhotoImported(object? sender, PhonePhotoImportedEventArgs args)
@@ -3323,10 +3348,16 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty]
     private bool _isStackRunning;
 
+    /// <summary>Stretched rendition of the finished stack, for display.</summary>
+    [ObservableProperty]
+    private ImageSource? _stackResultImage;
+
+    public bool HasStackResult => StackResultImage is not null;
+
     [ObservableProperty]
     private string _sirilPath = string.Empty;
 
-    public ObservableCollection<string> StackFrameNames { get; } = [];
+    public ObservableCollection<StackFrameTile> StackFrameNames { get; } = [];
 
     public double StackProgress => StackTargetFrameCount > 0
         ? Math.Clamp((double)StackCollectedCount / StackTargetFrameCount, 0, 1)
@@ -3349,6 +3380,15 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        _ = TryArmStackRun();
+    }
+
+    /// <summary>
+    /// Starts a fresh collection run. Returns false if the folder could not be
+    /// created.
+    /// </summary>
+    private bool TryArmStackRun()
+    {
         string root = PhoneCaptureFolder.Length > 0
             ? PhoneCaptureFolder
             : _paths.PhoneCaptureRoot;
@@ -3356,19 +3396,26 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         try
         {
             string folder = _stackSession.Arm(root, StackTargetFrameCount);
+            _livePreview.Reset();
+            LivePreviewImage = null;
+            LivePreviewFramesText = string.Empty;
             StackFrameNames.Clear();
             StackCollectedCount = 0;
             StackResultText = string.Empty;
             StackResultPath = string.Empty;
+            StackResultImage = null;
+            OnPropertyChanged(nameof(HasStackResult));
             StackFolderText = folder;
             IsStackArmed = true;
             StackStatusText = StackTargetFrameCount > 0
                 ? $"Armed. Every photo you take now is collected, up to {StackTargetFrameCount} frames."
                 : "Armed. Every photo you take now is collected until you stop.";
+            return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             StackStatusText = $"Could not start stack mode: {exception.Message}";
+            return false;
         }
     }
 
@@ -3411,6 +3458,13 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
             StackResultText = result.Message;
             StackResultPath = result.OutputPath ?? string.Empty;
+
+            // Show the stretched rendition: the master is linear FITS, which
+            // holds the real data but which nothing here can display.
+            StackResultImage = result.PreviewPath is { } preview
+                ? _livePreviewRenderer.LoadThumbnail(preview, 900)
+                : null;
+            OnPropertyChanged(nameof(HasStackResult));
             if (!result.Succeeded)
             {
                 _logger.LogWarning("Stacking failed: {Message}", result.Message);
@@ -3447,7 +3501,18 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             () =>
             {
                 StackCollectedCount = args.Collected;
-                StackFrameNames.Insert(0, Path.GetFileName(args.Frame.Path));
+                StackFrameNames.Insert(
+                    0,
+                    new StackFrameTile(
+                        Path.GetFileName(args.Frame.Path),
+                        _livePreviewRenderer.LoadThumbnail(args.Frame.Path)));
+
+                // Queued rather than decoded here: decoding and aligning a frame
+                // is slow enough to stutter the UI if done on the dispatcher.
+                if (IsLivePreviewEnabled)
+                {
+                    _livePreview.Offer(args.Frame.Path);
+                }
                 IsStackArmed = _stackSession.IsArmed;
                 OnPropertyChanged(nameof(StackProgress));
                 OnPropertyChanged(nameof(StackProgressText));
@@ -3551,8 +3616,33 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         AutoCaptureTriggeredCount = 0;
+
+        // Arm collection first. Firing an unattended sequence while nothing is
+        // collecting produces a folder of captures on the phone and an empty
+        // stack run, and the failure is silent: the shutter works, the files
+        // import, and the frame list simply stays at zero.
+        if (!_stackSession.IsArmed && !TryArmStackRun())
+        {
+            AutoCaptureStatusText = StackStatusText;
+            return;
+        }
+
         try
         {
+            // A volume-key shutter goes to whichever app holds the foreground, so
+            // firing before the camera is up sends the whole run into nothing and
+            // only surfaces at the watchdog a minute later.
+            AutoCaptureStatusText = $"Opening {SelectedCameraApp.Name} on the phone…";
+            CameraReadyResult ready = await _cameraForeground
+                .EnsureForegroundAsync(serial, SelectedCameraApp, _lifetimeCancellation.Token)
+                .ConfigureAwait(true);
+
+            if (!ready.Ready)
+            {
+                AutoCaptureStatusText = ready.Message;
+                return;
+            }
+
             await _autoCapture
                 .StartAsync(
                     new AutoCaptureOptions(
@@ -3614,4 +3704,85 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(AutoCaptureEstimatedRunText));
     }
 
+
+    // ------------------------------------------------------- live stack preview
+
+    /// <summary>
+    /// Rough running stack of the frames captured so far.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately lower quality than the final Siril stack. Its job is to show,
+    /// while the session is still running, whether the frames are usable at all.
+    /// </remarks>
+    [ObservableProperty]
+    private ImageSource? _livePreviewImage;
+
+    [ObservableProperty]
+    private string _livePreviewFramesText = string.Empty;
+
+    [ObservableProperty]
+    private string _livePreviewDriftText = string.Empty;
+
+    [ObservableProperty]
+    private bool _isLivePreviewEnabled = true;
+
+    public bool HasLivePreview => LivePreviewImage is not null;
+
+    private void HandleLivePreviewUpdated(object? sender, LivePreviewUpdatedEventArgs args) =>
+        Dispatch(
+            () =>
+            {
+                LivePreviewImage = args.Image;
+                LivePreviewFramesText = args.FramesStacked == 1
+                    ? "1 frame"
+                    : $"{args.FramesStacked} frames";
+
+                // Showing the measured drift makes it obvious when the mount has
+                // been knocked, which otherwise only surfaces at the final stack.
+                LivePreviewDriftText = args.Offset == FrameOffset.Zero
+                    ? "aligned"
+                    : $"drift {args.Offset.Dx:+0;-0;0}, {args.Offset.Dy:+0;-0;0} px";
+
+                OnPropertyChanged(nameof(HasLivePreview));
+            });
+
+    partial void OnLivePreviewImageChanged(ImageSource? value) =>
+        OnPropertyChanged(nameof(HasLivePreview));
+
+
+    // --------------------------------------------------------------- camera app
+
+    /// <summary>
+    /// Camera app used for shooting. The package and its output folder move
+    /// together, so selecting one both launches that app and points the photo
+    /// sync at the folder it writes to.
+    /// </summary>
+    public IReadOnlyList<CameraApp> CameraApps { get; } = CameraApp.All;
+
+    [ObservableProperty]
+    private CameraApp _selectedCameraApp = CameraApp.Default;
+
+    public string CameraAppFolderText => SelectedCameraApp.RemoteFolder;
+
+    partial void OnSelectedCameraAppChanged(CameraApp value)
+    {
+        // Watching the wrong folder produces a run that fires the shutter,
+        // captures successfully, and imports nothing.
+        _photoSync.RemoteFolder = value.RemoteFolder;
+        OnPropertyChanged(nameof(CameraAppFolderText));
+        StatusMessage = $"Shooting with {value.Name}; watching {value.RemoteFolder}.";
+    }
+
+}
+
+/// <summary>
+/// One collected frame in the stack list, with a thumbnail.
+/// </summary>
+/// <remarks>
+/// The thumbnail is null for a file that cannot be rendered, so the list falls
+/// back to showing the name rather than an empty box.
+/// </remarks>
+public sealed record StackFrameTile(string FileName, ImageSource? Thumbnail)
+{
+    public bool HasThumbnail => Thumbnail is not null;
 }

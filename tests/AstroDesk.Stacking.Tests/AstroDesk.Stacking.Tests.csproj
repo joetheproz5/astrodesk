@@ -6,7 +6,15 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <!-- The live preview decodes captures with WPF imaging, so the
+         pipeline test needs the imaging stack. -->
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- UseWPF swaps the implicit using set and drops System.IO. -->
+    <Using Include="System.IO" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />

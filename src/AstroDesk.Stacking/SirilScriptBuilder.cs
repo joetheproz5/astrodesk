@@ -19,10 +19,22 @@ namespace AstroDesk.Stacking;
 public static class SirilScriptBuilder
 {
     /// <summary>
-    /// Siril's sequence name for the converted frames. Every later command
-    /// refers to this, and the registered output becomes "r_" + this.
+    /// Base name handed to Siril's <c>convert</c>.
     /// </summary>
-    public const string SequenceName = "astrodesk";
+    public const string ConvertName = "astrodesk";
+
+    /// <summary>
+    /// The sequence Siril actually creates, which is the convert name with a
+    /// trailing underscore.
+    /// </summary>
+    /// <remarks>
+    /// Verified against Siril 1.4.4: <c>convert astrodesk</c> writes
+    /// <c>astrodesk_.seq</c> and frames named <c>astrodesk_00001.fit</c>.
+    /// Referring to it as "astrodesk" fails with "Reading sequence failed, file
+    /// cannot be opened: astrodesk.seq" and the whole run aborts before
+    /// registration.
+    /// </remarks>
+    public const string SequenceName = ConvertName + "_";
 
     /// <summary>
     /// Script format version. Siril refuses scripts that do not declare one it
@@ -54,7 +66,7 @@ public static class SirilScriptBuilder
         // Convert whatever the phone produced into a Siril sequence. -debayer
         // matters for DNG: the sensor data is a Bayer mosaic and must be
         // interpolated to colour before frames can be compared or combined.
-        script.Append("convert ").Append(SequenceName).Append(" -out=.");
+        script.Append("convert ").Append(ConvertName).Append(" -out=.");
         if (IsRawExtension(extension))
         {
             script.Append(" -debayer");

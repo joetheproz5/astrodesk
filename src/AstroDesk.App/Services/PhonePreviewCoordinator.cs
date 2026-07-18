@@ -30,6 +30,12 @@ public interface IPhonePreviewCoordinator : IAsyncDisposable
 
     event EventHandler<PreviewStatus>? StatusChanged;
 
+    /// <summary>
+    /// Raised when capture reattaches to a new scrcpy window, so the embedded
+    /// host can rebind instead of staying pointed at the destroyed one.
+    /// </summary>
+    event EventHandler<nint>? WindowHandleChanged;
+
     bool IsFrozen { get; set; }
 
     NightDisplayMode DisplayMode { get; set; }
@@ -67,6 +73,15 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
     private readonly PreviewScreenshotWriter _screenshotWriter;
     private readonly IPhonePhotoSyncService _photoSync;
     private readonly IPhoneOrientationSessionService _orientation;
+    private readonly IScrcpyWindowManager _windowManager;
+
+    /// <summary>
+    /// Recovery attempts allowed before the preview is declared dead, so a
+    /// genuinely gone window cannot spin forever.
+    /// </summary>
+    private const int MaximumCaptureRecoveries = 3;
+
+    private int _captureRecoveries;
     private readonly ILogger<PhonePreviewCoordinator> _logger;
     private readonly object _latestSync = new();
     private byte[]? _latestRawPixels;
@@ -85,6 +100,7 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
         PreviewScreenshotWriter screenshotWriter,
         IPhonePhotoSyncService photoSync,
         IPhoneOrientationSessionService orientation,
+        IScrcpyWindowManager windowManager,
         ILogger<PhonePreviewCoordinator> logger)
     {
         _capture = capture;
@@ -93,6 +109,7 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
         _screenshotWriter = screenshotWriter;
         _photoSync = photoSync;
         _orientation = orientation;
+        _windowManager = windowManager;
         _logger = logger;
 
         _capture.FrameArrived += HandleFrameArrived;
@@ -108,6 +125,8 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
     public event EventHandler<HistogramResult>? HistogramReady;
 
     public event EventHandler<PreviewStatus>? StatusChanged;
+
+    public event EventHandler<nint>? WindowHandleChanged;
 
     public bool IsFrozen { get; set; }
 
@@ -157,6 +176,7 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
         try
         {
             ScrcpySession session = await _scrcpy.StartAsync(options, cancellationToken).ConfigureAwait(false);
+            Interlocked.Exchange(ref _captureRecoveries, 0);
             await _capture.StartAsync(
                     session.WindowHandle,
                     new WindowCaptureOptions { FramesPerSecond = options.MaxFps is > 0 ? Math.Min(options.MaxFps.Value, 60) : 30 },
@@ -333,7 +353,71 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
     }
 
     private void HandleCaptureFailed(object? sender, CaptureErrorEventArgs args) =>
-        PublishStatus(false, "Embedded preview capture stopped.", args.Message);
+        _ = RecoverCaptureAsync(args);
+
+    /// <summary>
+    /// Re-resolves the scrcpy window and restarts capture after the handle dies.
+    /// </summary>
+    /// <remarks>
+    /// The window handle is captured once when the session starts, but scrcpy
+    /// recreates its SDL window on events such as the device rotating — which
+    /// AstroDesk itself triggers via EnterLandscapeAsync immediately before the
+    /// handle is taken. The old handle then fails GetClientRect with
+    /// ERROR_INVALID_WINDOW_HANDLE and the preview goes black for the rest of the
+    /// session. Because the process is still alive and its title is known, the
+    /// new window can simply be found again.
+    /// </remarks>
+    private async Task RecoverCaptureAsync(CaptureErrorEventArgs args)
+    {
+        ScrcpySession? session = _scrcpy.CurrentSession;
+        if (session is null)
+        {
+            PublishStatus(false, "Embedded preview capture stopped.", args.Message);
+            return;
+        }
+
+        if (Interlocked.Increment(ref _captureRecoveries) > MaximumCaptureRecoveries)
+        {
+            _logger.LogWarning(
+                "Preview capture failed {Count} times; giving up.",
+                MaximumCaptureRecoveries);
+            PublishStatus(false, "Embedded preview capture stopped.", args.Message);
+            return;
+        }
+
+        PublishStatus(false, "Reattaching to the phone preview…");
+
+        try
+        {
+            await _capture.StopAsync(CancellationToken.None).ConfigureAwait(false);
+
+            nint handle = await _windowManager
+                .FindWindowAsync(
+                    session.WindowTitle,
+                    session.ProcessId,
+                    TimeSpan.FromSeconds(10))
+                .ConfigureAwait(false);
+
+            if (handle == nint.Zero)
+            {
+                PublishStatus(false, "Embedded preview capture stopped.", args.Message);
+                return;
+            }
+
+            await _capture
+                .StartAsync(handle, new WindowCaptureOptions(), CancellationToken.None)
+                .ConfigureAwait(false);
+
+            WindowHandleChanged?.Invoke(this, handle);
+            _logger.LogInformation("Preview capture reattached to window {Handle}.", handle);
+            PublishStatus(true, "Embedded phone preview running.");
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Could not reattach the preview capture.");
+            PublishStatus(false, "Embedded preview capture stopped.", args.Message);
+        }
+    }
 
     private void HandleFpsChanged(object? sender, double fps)
     {

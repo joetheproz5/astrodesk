@@ -129,7 +129,7 @@ public sealed partial class SirilStackEngine : IStackEngine
             ? $"Stacked {stacked} of {frameCount} frames. {frameCount - stacked} could not be registered."
             : $"Stacked {stacked} frames.";
 
-        return new StackResult(true, output, stacked, message, log);
+        return new StackResult(true, output, stacked, message, log, FindPreview(request));
     }
 
     private void ReportLine(ProcessOutputLine line, IProgress<string>? progress)
@@ -146,6 +146,18 @@ public sealed partial class SirilStackEngine : IStackEngine
         {
             progress?.Report(line.Text);
         }
+    }
+
+    /// <summary>
+    /// The stretched TIFF written beside the master, or null when Siril did not
+    /// produce one.
+    /// </summary>
+    private static string? FindPreview(StackRequest request)
+    {
+        string path = Path.Combine(
+            request.WorkingDirectory,
+            $"{request.OutputName}_preview.tif");
+        return File.Exists(path) ? path : null;
     }
 
     private static string? FindOutput(StackRequest request)

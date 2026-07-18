@@ -7,22 +7,71 @@ namespace AstroDesk.Stacking.Tests;
 public sealed class AutoCaptureTests
 {
     [Fact]
-    public void Timeout_AllowsForSlowWritesAndNoiseReduction()
+    public void BootstrapTimeout_SurvivesExpertRawProcessing()
     {
-        // Samsung's long-exposure noise reduction can take about as long again
-        // as the exposure, so a tight bound would abort healthy runs.
-        TimeSpan timeout = AutoCaptureService.CalculateTimeout(
+        // Measured on an S23 Ultra: Expert RAW took about 120s from shutter to
+        // file, because its multi-frame astro processing dwarfs the exposure.
+        // The previous model gave 63s on these settings and would have aborted
+        // a healthy run on the very first frame.
+        TimeSpan timeout = AutoCaptureService.CalculateBootstrapTimeout(
             TimeSpan.FromSeconds(20),
             TimeSpan.FromSeconds(4));
 
-        Assert.True(timeout >= TimeSpan.FromSeconds(48), $"timeout was {timeout}");
+        Assert.True(
+            timeout >= TimeSpan.FromSeconds(120),
+            $"first-frame timeout {timeout} would abort an Expert RAW capture");
     }
 
     [Fact]
-    public void Timeout_HasAFloorForVeryShortExposures() =>
+    public void BootstrapTimeout_HasAGenerousFloor() =>
+        Assert.Equal(
+            AutoCaptureService.MinimumBootstrapTimeout,
+            AutoCaptureService.CalculateBootstrapTimeout(TimeSpan.Zero, TimeSpan.Zero));
+
+    [Fact]
+    public void AdaptiveTimeout_SizesFromWhatThePhoneActuallyDid()
+    {
+        // Two minutes observed should leave generous headroom, not a tight bound.
+        TimeSpan timeout = AutoCaptureService.CalculateAdaptiveTimeout(
+            [TimeSpan.FromSeconds(118), TimeSpan.FromSeconds(122)]);
+
+        Assert.True(timeout > TimeSpan.FromSeconds(122), $"timeout was {timeout}");
+        Assert.True(timeout >= TimeSpan.FromSeconds(240), $"timeout was {timeout}");
+    }
+
+    [Fact]
+    public void AdaptiveTimeout_UsesTheSlowestNotTheAverage()
+    {
+        // Sizing to the mean would abort on any frame slower than typical, which
+        // is exactly what happens as the phone heats up mid-session.
+        TimeSpan timeout = AutoCaptureService.CalculateAdaptiveTimeout(
+            [TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(100)]);
+
         Assert.True(
-            AutoCaptureService.CalculateTimeout(TimeSpan.FromMilliseconds(10), TimeSpan.Zero)
-                >= TimeSpan.FromSeconds(20));
+            timeout > TimeSpan.FromSeconds(100),
+            $"timeout {timeout} must clear the slowest observed frame");
+    }
+
+    [Fact]
+    public void AdaptiveTimeout_TightensForAFastCamera()
+    {
+        // The stock camera returns in a few seconds; there is no reason to wait
+        // five minutes for it once that is known.
+        TimeSpan timeout = AutoCaptureService.CalculateAdaptiveTimeout(
+            [TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(9)]);
+
+        Assert.True(timeout < AutoCaptureService.MinimumBootstrapTimeout);
+        Assert.True(
+            timeout >= AutoCaptureService.MinimumAdaptiveTimeout,
+            $"timeout {timeout} fell below the floor");
+        Assert.True(timeout <= TimeSpan.FromSeconds(60), $"timeout {timeout} is needlessly long");
+    }
+
+    [Fact]
+    public void AdaptiveTimeout_FallsBackWithNoObservations() =>
+        Assert.Equal(
+            AutoCaptureService.MinimumBootstrapTimeout,
+            AutoCaptureService.CalculateAdaptiveTimeout([]));
 
     [Fact]
     public void SettleDelay_NeverDropsBelowTheFloor() =>
@@ -91,9 +140,14 @@ public sealed class AutoCaptureTests
         // A shutter press that does nothing - volume key bound to zoom, or the
         // camera app not in the foreground - must not hang the run forever.
         await service.StartAsync(
-            new AutoCaptureOptions("SERIAL", TimeSpan.Zero, TimeSpan.Zero, FrameCount: 5));
+            new AutoCaptureOptions(
+                "SERIAL",
+                TimeSpan.Zero,
+                TimeSpan.Zero,
+                FrameCount: 5,
+                FirstFrameTimeout: TimeSpan.FromSeconds(2)));
 
-        AutoCaptureFinished result = await finished.Task.WaitAsync(TimeSpan.FromSeconds(40));
+        AutoCaptureFinished result = await finished.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
         Assert.True(result.TimedOut);
         Assert.Equal(1, result.FramesTriggered);

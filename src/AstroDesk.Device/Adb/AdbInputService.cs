@@ -17,6 +17,12 @@ public enum AndroidKeyCode
     Power = 26,
     Escape = 111,
     AppSwitch = 187,
+
+    /// <summary>
+    /// Wakes the display. Unlike <see cref="Power"/> this only ever turns the
+    /// screen on, so it is safe to send when the display is already awake.
+    /// </summary>
+    Wakeup = 224,
 }
 
 public interface IAdbInputService

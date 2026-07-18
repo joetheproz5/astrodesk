@@ -18,6 +18,12 @@ public interface IPhonePhotoSyncService : IAsyncDisposable
 
     string DestinationFolder { get; set; }
 
+    /// <summary>
+    /// Device folder to watch. Each camera app writes somewhere different, so
+    /// this follows whichever app is selected for shooting.
+    /// </summary>
+    string RemoteFolder { get; set; }
+
     Task StartAsync(string serial, CancellationToken cancellationToken = default);
 
     Task StopAsync(CancellationToken cancellationToken = default);
@@ -31,7 +37,7 @@ public sealed class PhonePhotoSyncService(
     IAdbCommandExecutor adb,
     ILogger<PhonePhotoSyncService> logger) : IPhonePhotoSyncService
 {
-    private const string RemoteCameraFolder = "/sdcard/DCIM/Camera";
+    private const string DefaultRemoteFolder = "/sdcard/DCIM/Camera";
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
     private readonly IAdbCommandExecutor _adb = adb;
     private readonly ILogger<PhonePhotoSyncService> _logger = logger;
@@ -44,6 +50,8 @@ public sealed class PhonePhotoSyncService(
     public bool Enabled { get; set; } = true;
 
     public string DestinationFolder { get; set; } = string.Empty;
+
+    public string RemoteFolder { get; set; } = DefaultRemoteFolder;
 
     public async Task StartAsync(string serial, CancellationToken cancellationToken = default)
     {
@@ -122,7 +130,7 @@ public sealed class PhonePhotoSyncService(
                         baselineEstablished = true;
                         _logger.LogInformation(
                             "Phone photo sync is watching {RemoteFolder} on {Serial}.",
-                            RemoteCameraFolder,
+                            RemoteFolder,
                             serial);
                     }
                     else if (Enabled)
@@ -169,7 +177,7 @@ public sealed class PhonePhotoSyncService(
     {
         ProcessExecutionResult result = await _adb.ExecuteAsync(
                 serial,
-                ["shell", "ls", "-1", RemoteCameraFolder],
+                ["shell", "ls", "-1", $"'{RemoteFolder}'"],
                 cancellationToken)
             .ConfigureAwait(false);
         if (!result.Succeeded)
@@ -182,7 +190,7 @@ public sealed class PhonePhotoSyncService(
             .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(Path.GetFileName)
             .Where(fileName => !string.IsNullOrWhiteSpace(fileName) && IsPhoto(fileName))
-            .Select(fileName => $"{RemoteCameraFolder}/{fileName}")
+            .Select(fileName => $"{RemoteFolder}/{fileName}")
             .Distinct(StringComparer.Ordinal)
             .ToArray();
     }

@@ -185,7 +185,12 @@ public partial class App : Application
                 ReconnectCooldown = TimeSpan.FromSeconds(30),
             });
         builder.Services.AddSingleton<IStackSessionService, StackSessionService>();
+        builder.Services.AddSingleton<ILivePreviewRenderer, LivePreviewRenderer>();
+        builder.Services.AddSingleton<ILivePreviewStackCoordinator, LivePreviewStackCoordinator>();
+        builder.Services.AddSingleton<ICaptureFlushPrompt, CaptureFlushPrompt>();
+        builder.Services.AddSingleton<IScreenWakeGuard, ScreenWakeGuard>();
         builder.Services.AddSingleton<IAutoCaptureService, AutoCaptureService>();
+        builder.Services.AddSingleton<ICameraForegroundService, CameraForegroundService>();
         builder.Services.AddSingleton<IStackEngine>(
             provider => new SirilStackEngine(
                 provider.GetRequiredService<IProcessRunner>(),
