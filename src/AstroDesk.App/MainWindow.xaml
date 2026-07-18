@@ -200,12 +200,12 @@
                         <WrapPanel Margin="12,8,12,4" Orientation="Horizontal">
                             <WrapPanel.Resources>
                                 <Style TargetType="StackPanel">
-                                    <Setter Property="Width" Value="152" />
-                                    <Setter Property="Margin" Value="0,0,10,6" />
+                                    <Setter Property="Width" Value="126" />
+                                    <Setter Property="Margin" Value="0,0,8,6" />
                                 </Style>
                             </WrapPanel.Resources>
 
-                            <StackPanel Width="210">
+                            <StackPanel Width="182">
                                 <TextBlock Text="SHOOTING SCORE" Style="{StaticResource TelemetryLabel}" />
                                 <TextBlock Text="{Binding ShootingScoreText}"
                                            Style="{StaticResource TelemetryValue}"
@@ -224,7 +224,7 @@
                                            ToolTip="The weather would allow a better night; sky brightness is the limit." />
                             </StackPanel>
 
-                            <StackPanel Width="176">
+                            <StackPanel Width="148">
                                 <TextBlock Text="SHOOTING WINDOW" Style="{StaticResource TelemetryLabel}" />
                                 <TextBlock Text="{Binding BestShootingWindowText}"
                                            Style="{StaticResource TelemetryValue}"
@@ -263,7 +263,10 @@
                             <!-- Sky darkness sits beside the weather readings because it is
                                  measured like them, and it is what caps the score for a
                                  faint target however good the weather is. -->
-                            <StackPanel Width="176">
+                            <!-- Wider gutter than its neighbours: the mag/arcsec² reading
+                                 fills this cell edge to edge, so the default 8 leaves it
+                                 touching the moon phase beside it. -->
+                            <StackPanel Width="176" Margin="0,0,20,6">
                                 <TextBlock Text="SKY DARKNESS" Style="{StaticResource TelemetryLabel}" />
                                 <TextBlock Text="{Binding SkyDarknessText}"
                                            Style="{StaticResource TelemetryValue}"
@@ -280,7 +283,7 @@
                                            Visibility="{Binding IsSkyLimited, Converter={StaticResource BoolToVisibility}}" />
                             </StackPanel>
 
-                            <StackPanel Width="168">
+                            <StackPanel>
                                 <TextBlock Text="MOON" Style="{StaticResource TelemetryLabel}" />
                                 <TextBlock Text="{Binding MoonIlluminationText}" Style="{StaticResource TelemetryValue}" Margin="0,3,0,0" />
                                 <TextBlock Text="{Binding MoonPhaseText}" Style="{StaticResource TelemetrySub}" Margin="0,2,0,0" ToolTip="{Binding MoonPhaseText}" />
