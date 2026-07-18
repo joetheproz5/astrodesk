@@ -2887,6 +2887,24 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 ? $"{FormatLocationTime(start)} – {FormatLocationTime(end)}"
                 : "Unavailable";
         ShootingAdviceText = plan.Details;
+
+        // Shown beside the score so a night held back by sky brightness rather
+        // than weather is legible at a glance: bad weather means wait, a bright
+        // sky means drive somewhere darker.
+        WeatherScoreText = plan.Quality == ObservingQuality.Unavailable
+            ? string.Empty
+            : $"WEATHER {plan.WeatherScore}";
+        IsSkyLimited = plan.Quality != ObservingQuality.Unavailable &&
+                       plan.WeatherScore - plan.Score >= 15;
+
+        // 100% is a pristine sky. This is the figure the score is multiplied by,
+        // so showing it makes the rating traceable rather than mysterious.
+        SkyDarknessText = plan.Quality == ObservingQuality.Unavailable
+            ? "—"
+            : $"{plan.SkyDarknessPercent}%";
+        SkyLimitText = IsSkyLimited
+            ? "LIMITING THIS TARGET"
+            : string.Empty;
     }
 
     private void ApplyLatestPreviewFrame()
@@ -3559,6 +3577,22 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     [ObservableProperty]
     private string _autoCaptureStatusText = "Auto capture is off.";
+
+    [ObservableProperty]
+    private string _weatherScoreText = string.Empty;
+
+    /// <summary>Sky darkness as a percentage, where 100% is pristine.</summary>
+    [ObservableProperty]
+    private string _skyDarknessText = "—";
+
+    [ObservableProperty]
+    private string _skyLimitText = string.Empty;
+
+    /// <summary>
+    /// True when the weather would allow a good night but sky brightness will not.
+    /// </summary>
+    [ObservableProperty]
+    private bool _isSkyLimited;
 
     [ObservableProperty]
     private string _autoCaptureTelemetryText = string.Empty;

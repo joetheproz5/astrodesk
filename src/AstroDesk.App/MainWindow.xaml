@@ -205,7 +205,7 @@
                                 </Style>
                             </WrapPanel.Resources>
 
-                            <StackPanel Width="196">
+                            <StackPanel Width="210">
                                 <TextBlock Text="SHOOTING SCORE" Style="{StaticResource TelemetryLabel}" />
                                 <TextBlock Text="{Binding ShootingScoreText}"
                                            Style="{StaticResource TelemetryValue}"
@@ -215,6 +215,13 @@
                                            Style="{StaticResource TelemetrySub}"
                                            Margin="0,2,0,0"
                                            ToolTip="{Binding ShootingRecommendationText}" />
+                                <TextBlock Text="{Binding WeatherScoreText}"
+                                           Style="{StaticResource TelemetrySub}"
+                                           FontSize="9.5"
+                                           Margin="0,1,0,0"
+                                           Visibility="{Binding IsSkyLimited, Converter={StaticResource BoolToVisibility}}"
+                                           Foreground="{DynamicResource WarningBrush}"
+                                           ToolTip="The weather would allow a better night; sky brightness is the limit." />
                             </StackPanel>
 
                             <StackPanel Width="176">
@@ -251,6 +258,26 @@
                                 <TextBlock Text="WIND" Style="{StaticResource TelemetryLabel}" />
                                 <TextBlock Text="{Binding WindText}" Style="{StaticResource TelemetryValue}" Margin="0,3,0,0" />
                                 <TextBlock Text="{Binding PrecipitationText, StringFormat=RAIN {0}}" Style="{StaticResource TelemetrySub}" Margin="0,2,0,0" />
+                            </StackPanel>
+
+                            <!-- Sky darkness sits beside the weather readings because it is
+                                 measured like them, and it is what caps the score for a
+                                 faint target however good the weather is. -->
+                            <StackPanel Width="176">
+                                <TextBlock Text="SKY DARKNESS" Style="{StaticResource TelemetryLabel}" />
+                                <TextBlock Text="{Binding SkyDarknessText}"
+                                           Style="{StaticResource TelemetryValue}"
+                                           Foreground="{DynamicResource WarningBrush}"
+                                           Margin="0,3,0,0" />
+                                <TextBlock Text="{Binding LightPollutionText}"
+                                           Style="{StaticResource TelemetrySub}"
+                                           Margin="0,2,0,0"
+                                           ToolTip="{Binding LightPollutionDetailText}" />
+                                <TextBlock Text="{Binding SkyLimitText}"
+                                           Style="{StaticResource TelemetrySub}"
+                                           FontSize="9"
+                                           Foreground="{DynamicResource WarningBrush}"
+                                           Visibility="{Binding IsSkyLimited, Converter={StaticResource BoolToVisibility}}" />
                             </StackPanel>
 
                             <StackPanel Width="168">
