@@ -476,6 +476,7 @@
                                                                       DebugOverlay="{Binding DebugOverlay}"
                                                                       DebugText="{Binding DebugOverlayText}"
                                                                       Rotation="{Binding PreviewRotation}"
+                                                                      ShootingZone="{Binding ShootingZone}"
                                                                       ScrcpyClientSize="{Binding ScrcpyClientSize}" />
                                         <!-- NativeScrcpyHost is an HwndHost holding scrcpy's own window,
                                              reparented into the layout. Do not wrap this in a container
@@ -515,6 +516,17 @@
                                         <CheckBox Content="Loupe" IsChecked="{Binding FocusMagnifier}" FontSize="11.5" VerticalAlignment="Center" Margin="0,0,12,0" />
                                     </WrapPanel>
                                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <TextBlock Text="ZONE"
+                                                   Style="{StaticResource TelemetryLabel}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,7,0" />
+                                        <ComboBox ItemsSource="{Binding ShootingZoneOptions}"
+                                                  SelectedItem="{Binding SelectedShootingZone}"
+                                                  Width="146"
+                                                  MinHeight="28"
+                                                  VerticalAlignment="Center"
+                                                  Margin="0,0,10,0"
+                                                  ToolTip="Draw the guides inside the camera's viewfinder rather than across the whole phone screen. Expert RAW keeps a control panel down one side, so full-screen guides land off the frame." />
                                         <Button Content="Hide all" Command="{Binding HideAllOverlaysCommand}" Style="{StaticResource PanelButton}" MinHeight="28" Padding="9,3" />
                                     </StackPanel>
                                 </Grid>
@@ -1004,6 +1016,7 @@
                                                   DebugOverlay="{Binding DebugOverlay}"
                                                   DebugText="{Binding DebugOverlayText}"
                                                   Rotation="{Binding PreviewRotation}"
+                                                  ShootingZone="{Binding ShootingZone}"
                                                   ScrcpyClientSize="{Binding ScrcpyClientSize}" />
                     <controls:NativeScrcpyHost SourceWindowHandle="{Binding FullscreenScrcpyWindowHandle}" />
                     <Button Content="Exit fullscreen"

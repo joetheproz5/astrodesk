@@ -174,6 +174,18 @@ public sealed class PhonePreviewControl : FrameworkElement
         typeof(PhonePreviewControl),
         new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.AffectsRender));
 
+    /// <summary>
+    /// The part of the mirrored screen the camera actually shoots. Guides are
+    /// drawn inside this rather than across the whole phone display.
+    /// </summary>
+    public static readonly DependencyProperty ShootingZoneProperty = DependencyProperty.Register(
+        nameof(ShootingZone),
+        typeof(ShootingZone),
+        typeof(PhonePreviewControl),
+        new FrameworkPropertyMetadata(
+            ShootingZone.FullScreen,
+            FrameworkPropertyMetadataOptions.AffectsRender));
+
     private Point _lastCursorPosition;
     private TouchDevice? _activeTouchDevice;
     private long _suppressMouseUntilTimestamp;
@@ -355,6 +367,12 @@ public sealed class PhonePreviewControl : FrameworkElement
         set => SetValue(GuidesOnlyProperty, value);
     }
 
+    public ShootingZone ShootingZone
+    {
+        get => (ShootingZone)GetValue(ShootingZoneProperty);
+        set => SetValue(ShootingZoneProperty, value);
+    }
+
     public CoordinateMappingContext? CreateMappingContext()
     {
         if (Source is null || ActualWidth <= 0 || ActualHeight <= 0)
@@ -456,8 +474,41 @@ public sealed class PhonePreviewControl : FrameworkElement
         return new Rect(centerX - halfWidth, centerY - halfHeight, width, height);
     }
 
-    private void DrawOverlays(DrawingContext context, Rect bounds)
+    /// <summary>
+    /// Narrows a rendered preview rectangle to the camera's shooting zone.
+    /// </summary>
+    private Rect ApplyShootingZone(Rect rendered)
     {
+        ShootingZone zone = ShootingZone.Normalised();
+        if (zone.IsFullScreen)
+        {
+            return rendered;
+        }
+
+        RectD area = zone.Within(new RectD(rendered.X, rendered.Y, rendered.Width, rendered.Height));
+        return new Rect(area.X, area.Y, area.Width, area.Height);
+    }
+
+    private void DrawOverlays(DrawingContext context, Rect renderedBounds)
+    {
+        Rect bounds = ApplyShootingZone(renderedBounds);
+
+        // Outline the zone whenever it is not the whole screen. Guides that sit
+        // inside an invisible boundary are impossible to sanity-check against the
+        // camera's own framing; a faint edge makes a misaligned zone obvious
+        // instead of quietly wrong.
+        if (bounds != renderedBounds)
+        {
+            Brush edgeBrush = OverlayBrush.Clone();
+            edgeBrush.Opacity = Math.Clamp(OverlayOpacity, 0, 1) * 0.45;
+            Pen edgePen = new(edgeBrush, 1)
+            {
+                DashStyle = new DashStyle([4, 4], 0),
+            };
+            edgePen.Freeze();
+            context.DrawRectangle(null, edgePen, bounds);
+        }
+
         Brush brush = OverlayBrush.Clone();
         brush.Opacity = Math.Clamp(OverlayOpacity, 0, 1);
         Pen pen = new(brush, Math.Clamp(OverlayThickness, 0.5, 8));

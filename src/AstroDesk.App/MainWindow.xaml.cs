@@ -120,6 +120,7 @@ public partial class MainWindow : Window
         BindGuide(guides, PhonePreviewControl.OverlayBrushProperty, nameof(MainWindowViewModel.OverlayBrush));
         BindGuide(guides, PhonePreviewControl.OverlayOpacityProperty, nameof(MainWindowViewModel.OverlayOpacity));
         BindGuide(guides, PhonePreviewControl.OverlayThicknessProperty, nameof(MainWindowViewModel.OverlayThickness));
+        BindGuide(guides, PhonePreviewControl.ShootingZoneProperty, nameof(MainWindowViewModel.ShootingZone));
 
         _guideOverlay = new PreviewOverlayWindow { Content = guides };
         _guideOverlay.Attach(this);

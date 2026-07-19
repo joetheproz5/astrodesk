@@ -665,6 +665,34 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty]
     private bool _boostQualityOnCable = true;
 
+    // ------------------------------------------------------------ shooting zone
+
+    public const string ShootingZoneFullScreen = "Full screen";
+    public const string ShootingZoneExpertRaw = "Expert RAW (4:3)";
+
+    public IReadOnlyList<string> ShootingZoneOptions { get; } =
+        [ShootingZoneFullScreen, ShootingZoneExpertRaw];
+
+    /// <summary>
+    /// Which camera layout the framing guides should be drawn inside.
+    /// </summary>
+    /// <remarks>
+    /// Guides across the whole mirrored screen land inside the camera app's own
+    /// control panel rather than on the frame, so composing to them puts the
+    /// subject in the wrong place in the photograph.
+    /// </remarks>
+    [ObservableProperty]
+    private string _selectedShootingZone = ShootingZoneFullScreen;
+
+    public ShootingZone ShootingZone => SelectedShootingZone switch
+    {
+        ShootingZoneExpertRaw => Capture.Geometry.ShootingZone.ExpertRaw43,
+        _ => Capture.Geometry.ShootingZone.FullScreen,
+    };
+
+    partial void OnSelectedShootingZoneChanged(string value) =>
+        OnPropertyChanged(nameof(ShootingZone));
+
     [ObservableProperty]
     private int _statusRefreshSeconds = 20;
 
@@ -2249,6 +2277,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             await settings.SetAsync("Scrcpy.MaxResolution", ScrcpyMaxResolution, "Device", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Scrcpy.MaxFps", ScrcpyMaxFps, "Device", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Scrcpy.BoostOnCable", BoostQualityOnCable, "Device", _lifetimeCancellation.Token).ConfigureAwait(true);
+            await settings.SetAsync("Overlay.ShootingZone", SelectedShootingZone, "Overlay", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Status.RefreshSeconds", StatusRefreshSeconds, "Status", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Weather.RefreshMinutes", WeatherRefreshMinutes, "Conditions", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Session.DefaultLocation", DefaultLocationName, "Session", _lifetimeCancellation.Token).ConfigureAwait(true);
@@ -2490,6 +2519,14 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         ScrcpyMaxResolution = await settings.GetAsync("Scrcpy.MaxResolution", ScrcpyMaxResolution, cancellationToken);
         ScrcpyMaxFps = await settings.GetAsync("Scrcpy.MaxFps", ScrcpyMaxFps, cancellationToken);
         BoostQualityOnCable = await settings.GetAsync("Scrcpy.BoostOnCable", BoostQualityOnCable, cancellationToken);
+
+        // Guard the stored value: a preset that no longer exists must fall back to
+        // the whole screen rather than leaving the guides drawn nowhere.
+        string storedZone = await settings.GetAsync("Overlay.ShootingZone", SelectedShootingZone, cancellationToken)
+                            ?? ShootingZoneFullScreen;
+        SelectedShootingZone = ShootingZoneOptions.Contains(storedZone)
+            ? storedZone
+            : ShootingZoneFullScreen;
         StatusRefreshSeconds = await settings.GetAsync("Status.RefreshSeconds", StatusRefreshSeconds, cancellationToken);
         WeatherRefreshMinutes = await settings.GetAsync("Weather.RefreshMinutes", WeatherRefreshMinutes, cancellationToken);
         DefaultLocationName = await settings.GetAsync("Session.DefaultLocation", _appOptions.DefaultLocation, cancellationToken)
