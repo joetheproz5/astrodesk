@@ -773,6 +773,30 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public bool IsStacking => CurrentPage == "Stacking";
 
+    public bool IsSky => CurrentPage == "Sky";
+
+    /// <summary>
+    /// The light-pollution map, opened on the site currently being planned.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the live web map rather than something drawn from the atlas tiles
+    /// the app already downloads. Those tiles would give an offline map, but
+    /// choosing where to shoot is planning done at a desk rather than at the
+    /// tripod, and the site brings panning, search and overlays that would each
+    /// have to be rebuilt for no gain.
+    /// </para>
+    /// <para>
+    /// Zoom 9 is close enough to tell one valley from the next while still
+    /// showing where the nearest town's glow reaches.
+    /// </para>
+    /// </remarks>
+    public Uri SkyMapUri => new(
+        "https://www.lightpollutionmap.app/?" +
+        $"lat={Latitude.ToString("0.######", CultureInfo.InvariantCulture)}" +
+        $"&lng={Longitude.ToString("0.######", CultureInfo.InvariantCulture)}" +
+        "&zoom=9");
+
     public bool HasActiveSession => _activeSession is not null;
 
     public bool IsSessionPaused => _activeSession?.Status == SessionStatus.Paused;
@@ -918,6 +942,15 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     [RelayCommand]
     private void ShowStacking() => CurrentPage = "Stacking";
+
+    [RelayCommand]
+    private void ShowSky() => CurrentPage = "Sky";
+
+    /// <summary>
+    /// Re-centres the map on the site currently being planned.
+    /// </summary>
+    [RelayCommand]
+    private void RecentreSkyMap() => OnPropertyChanged(nameof(SkyMapUri));
 
     [RelayCommand]
     private async Task StartPreviewAsync()
@@ -2403,6 +2436,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(IsHistory));
         OnPropertyChanged(nameof(IsSettings));
         OnPropertyChanged(nameof(IsStacking));
+        OnPropertyChanged(nameof(IsSky));
     }
 
     partial void OnShowNightBriefDrawerChanged(bool value)

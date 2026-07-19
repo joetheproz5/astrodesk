@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:controls="clr-namespace:AstroDesk.App.Controls"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         mc:Ignorable="d"
         Title="AstroDesk"
         Icon="Assets/AstroDesk.ico"
@@ -98,6 +99,20 @@
                             <Style TargetType="Button" BasedOn="{StaticResource TouchNavButton}">
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsStacking}" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource PanelRaisedBrush}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource PanelBorderBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                    <Button Content="Sky"
+                            Command="{Binding ShowSkyCommand}"
+                            Margin="0,0,4,0">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource TouchNavButton}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsSky}" Value="True">
                                         <Setter Property="Background" Value="{DynamicResource PanelRaisedBrush}" />
                                         <Setter Property="BorderBrush" Value="{DynamicResource PanelBorderBrush}" />
                                     </DataTrigger>
@@ -1581,6 +1596,52 @@
                  over a session. Averaging them unregistered yields trails, not a
                  cleaner image, which is why the heavy lifting is handed to Siril
                  for star-based registration before integration. -->
+            <!-- SKY — light pollution map for choosing where to drive.
+                 The live web map rather than something drawn from the atlas
+                 tiles the app already caches: picking a site is planning done at
+                 a desk, not at the tripod, and the site brings panning, search
+                 and overlays that would each have to be rebuilt for no gain. -->
+            <Grid Visibility="{Binding IsSky, Converter={StaticResource BoolToVisibility}}"
+                  Margin="18,16,18,16">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="12" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <DockPanel Grid.Row="0" LastChildFill="False">
+                    <StackPanel DockPanel.Dock="Left">
+                        <TextBlock Text="LIGHT POLLUTION" Style="{StaticResource RailHeader}" Margin="0" />
+                        <TextBlock Text="{Binding LocationCoordinateText, StringFormat=Centred on {0}}"
+                                   Style="{StaticResource TelemetrySub}"
+                                   Margin="0,3,0,0" />
+                    </StackPanel>
+                    <Button DockPanel.Dock="Right"
+                            Content="Recentre on site"
+                            Command="{Binding RecentreSkyMapCommand}"
+                            Style="{StaticResource PanelButton}"
+                            MinHeight="30"
+                            Padding="11,4"
+                            VerticalAlignment="Center"
+                            ToolTip="Pan the map back to the coordinates this session is planned for." />
+                </DockPanel>
+
+                <Border Grid.Row="2"
+                        BorderBrush="{DynamicResource PanelBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="2"
+                        ClipToBounds="True">
+                    <Grid>
+                        <TextBlock Text="Loading the light pollution map…&#10;This needs an internet connection."
+                                   Style="{StaticResource TelemetrySub}"
+                                   TextAlignment="Center"
+                                   HorizontalAlignment="Center"
+                                   VerticalAlignment="Center" />
+                        <wv2:WebView2 x:Name="SkyMap" Source="{Binding SkyMapUri}" />
+                    </Grid>
+                </Border>
+            </Grid>
+
             <Grid Visibility="{Binding IsStacking, Converter={StaticResource BoolToVisibility}}"
                   Margin="18,16,18,16">
                 <Grid.RowDefinitions>
