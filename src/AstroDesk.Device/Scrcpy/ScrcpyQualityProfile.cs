@@ -35,16 +35,31 @@ public enum DeviceTransport
 public sealed record ScrcpyQualityProfile(int MaxSize, int MaxFps, int VideoBitRateMbps)
 {
     /// <summary>
-    /// Full-rate profile for USB.
+    /// Higher-quality profile for USB. Opt-in, not the default.
     /// </summary>
     /// <remarks>
-    /// 2560 leaves an S23 Ultra running at FHD+ (1080x2340) completely
-    /// unscaled and only mildly downscales QHD+ (1440x3088). 40 Mbps is well
-    /// inside what USB 2.0 carries in practice and stops the encoder smearing
-    /// faint stars into blocking artefacts, which is the failure mode that
-    /// actually costs you a focus check.
+    /// <para>
+    /// 2560 leaves an S23 Ultra running at FHD+ (1080x2340) unscaled and only
+    /// mildly downscales QHD+ (1440x3088), which is where the visible gain is.
+    /// </para>
+    /// <para>
+    /// This was 40 Mbps at 90 fps, on the reasoning that a cable has bandwidth to
+    /// spare. Measured on a real S23 Ultra over USB, that reasoning was wrong in
+    /// a way that mattered: the link reset under the traffic within seconds of
+    /// any on-screen movement. adbd reported "UsbFfs: connection terminated:
+    /// Connection reset by peer" and the scrcpy server died with it, so the
+    /// preview dropped the moment the user touched anything.
+    /// </para>
+    /// <para>
+    /// The reset is a USB-link problem rather than a bandwidth ceiling - it can
+    /// happen at the wireless bitrate too - but tripling the throughput turned an
+    /// occasional fault into one that fired on every interaction. The frame rate
+    /// is back to 60 because the extra frames were duplicates anyway: the phone's
+    /// camera preview runs well below 60 in the dark. What is left is the
+    /// resolution, which is the part that was actually worth having.
+    /// </para>
     /// </remarks>
-    public static ScrcpyQualityProfile Cable { get; } = new(2560, 90, 40);
+    public static ScrcpyQualityProfile Cable { get; } = new(2560, 60, 24);
 
     /// <summary>
     /// Conservative profile for Wi-Fi, where the link is shared and lossy.

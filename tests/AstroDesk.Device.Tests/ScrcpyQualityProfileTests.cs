@@ -47,12 +47,28 @@ public sealed class ScrcpyQualityProfileTests
     public void TheCableProfileIsRicherThanTheWirelessOne()
     {
         // The whole point: one profile everywhere throttles the cable down to
-        // what Wi-Fi can survive.
+        // what Wi-Fi can survive. Resolution is where the visible gain is.
         Assert.True(ScrcpyQualityProfile.Cable.MaxSize > ScrcpyQualityProfile.Wireless.MaxSize);
-        Assert.True(ScrcpyQualityProfile.Cable.MaxFps > ScrcpyQualityProfile.Wireless.MaxFps);
         Assert.True(
             ScrcpyQualityProfile.Cable.VideoBitRateMbps >
             ScrcpyQualityProfile.Wireless.VideoBitRateMbps);
+    }
+
+    [Fact]
+    public void TheCableProfileStaysWithinWhatAUsbLinkSurvived()
+    {
+        // Regression guard. At 90 fps and 40 Mbps a real S23 Ultra reset the USB
+        // link within seconds of any on-screen movement - adbd logged "UsbFfs:
+        // connection terminated: Connection reset by peer" and the scrcpy server
+        // died with it - so the preview dropped whenever it was touched. The
+        // frame rate buys nothing here anyway: the phone's camera preview runs
+        // well below 60 in the dark, so the extra frames are duplicates.
+        Assert.True(
+            ScrcpyQualityProfile.Cable.MaxFps <= 60,
+            $"frame rate {ScrcpyQualityProfile.Cable.MaxFps} destabilised the link");
+        Assert.True(
+            ScrcpyQualityProfile.Cable.VideoBitRateMbps <= 24,
+            $"bitrate {ScrcpyQualityProfile.Cable.VideoBitRateMbps} Mbps destabilised the link");
     }
 
     [Fact]

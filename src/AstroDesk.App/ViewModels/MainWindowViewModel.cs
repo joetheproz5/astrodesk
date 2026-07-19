@@ -660,10 +660,17 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     /// <summary>
     /// Raises the stream quality above the saved settings when the phone is on
-    /// USB, where the link can carry it.
+    /// USB.
     /// </summary>
+    /// <remarks>
+    /// Off by default. It was on, and on a real S23 Ultra the extra traffic
+    /// reset the USB link within seconds of any on-screen movement, taking the
+    /// scrcpy server down with it. A preview that dies whenever it is touched is
+    /// far worse than one that is slightly softer, so the sharper stream has to
+    /// be asked for rather than assumed.
+    /// </remarks>
     [ObservableProperty]
-    private bool _boostQualityOnCable = true;
+    private bool _boostQualityOnCable;
 
     // ------------------------------------------------------------ shooting zone
 
