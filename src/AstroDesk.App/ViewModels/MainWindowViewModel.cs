@@ -779,6 +779,82 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public bool IsLibrary => CurrentPage == "Library";
 
+    // ----------------------------------------------------------- header chips
+
+    /// <summary>
+    /// Battery, free space and phone temperature, kept in the header.
+    /// </summary>
+    /// <remarks>
+    /// All three were already polled and then discarded by the UI. Each one ends
+    /// a session on its own - a flat phone, a full disk, or a sensor hot enough
+    /// that the frames are noise - and none of them was visible without opening
+    /// a panel, which is not something anyone does at three in the morning.
+    /// </remarks>
+    [ObservableProperty]
+    private string _batteryChipText = "—";
+
+    [ObservableProperty]
+    private string _storageChipText = "—";
+
+    [ObservableProperty]
+    private string _phoneTemperatureChipText = "—";
+
+    [ObservableProperty]
+    private bool _hasPhoneVitals;
+
+    /// <summary>
+    /// Below this the phone may not survive the rest of a long run.
+    /// </summary>
+    private const int LowBatteryPercent = 30;
+
+    /// <summary>
+    /// Roughly one full session of raw frames at about 28 MB each.
+    /// </summary>
+    private const long LowStorageBytes = 4L * 1024 * 1024 * 1024;
+
+    /// <summary>
+    /// Above this thermal noise starts showing in stacked results, which is the
+    /// whole reason the cable profile stayed at 60 fps.
+    /// </summary>
+    private const decimal HotPhoneCelsius = 40;
+
+    [ObservableProperty]
+    private bool _isBatteryLow;
+
+    [ObservableProperty]
+    private bool _isStorageLow;
+
+    [ObservableProperty]
+    private bool _isPhoneHot;
+
+    private void UpdateHeaderChips(PhoneStatus? status)
+    {
+        HasPhoneVitals = status is not null;
+
+        BatteryChipText = status?.BatteryPercentage is { } battery ? $"{battery}%" : "—";
+        IsBatteryLow = status?.BatteryPercentage is { } level &&
+                       level < LowBatteryPercent &&
+                       status.ChargingState != ChargingState.Charging;
+
+        if (status?.InternalStorage is { } storage)
+        {
+            StorageChipText = FormatBytes(storage.FreeBytes);
+            IsStorageLow = storage.FreeBytes < LowStorageBytes;
+        }
+        else
+        {
+            StorageChipText = "—";
+            IsStorageLow = false;
+        }
+
+        decimal? phoneTemperature = status?.EstimatedPhoneTemperatureCelsius
+                                    ?? status?.BatteryTemperatureCelsius;
+        PhoneTemperatureChipText = phoneTemperature is null
+            ? "—"
+            : $"{phoneTemperature.Value:0} °C";
+        IsPhoneHot = phoneTemperature >= HotPhoneCelsius;
+    }
+
     // ---------------------------------------------------------------- library
 
     public ObservableCollection<CaptureRunSummary> LibraryRuns { get; } = [];
@@ -3078,6 +3154,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 StorageText = status?.InternalStorage is { } storage
                     ? $"{FormatBytes(storage.FreeBytes)} free / {FormatBytes(storage.TotalBytes)}"
                     : "Unavailable";
+                UpdateHeaderChips(status);
                 ScreenResolutionText = status?.ScreenResolution is { } resolution
                     ? $"{resolution.Width} × {resolution.Height}"
                     : "Unavailable";

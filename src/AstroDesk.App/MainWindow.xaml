@@ -172,6 +172,79 @@
                 <StackPanel Grid.Column="4"
                             Orientation="Horizontal"
                             VerticalAlignment="Center">
+                    <!-- Phone vitals. Each of these ends a session on its own -
+                         a flat battery, a full disk, or a sensor hot enough that
+                         the frames are mostly noise - and all three were already
+                         being polled and thrown away. They turn amber rather
+                         than shouting, because the point is to be noticed in
+                         passing, not to interrupt. -->
+                    <ItemsControl VerticalAlignment="Center"
+                                  Margin="0,0,10,0"
+                                  Visibility="{Binding HasPhoneVitals, Converter={StaticResource BoolToVisibility}}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+
+                        <Border Style="{StaticResource StatusPill}" Padding="9,5" Margin="0,0,6,0"
+                                ToolTip="Phone battery. A flat phone ends the session.">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="BAT" Style="{StaticResource TelemetryLabel}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <TextBlock Text="{Binding BatteryChipText}" VerticalAlignment="Center" FontSize="12">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsBatteryLow}" Value="True">
+                                                    <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource StatusPill}" Padding="9,5" Margin="0,0,6,0"
+                                ToolTip="Free space on the phone. A raw frame is around 28 MB.">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="FREE" Style="{StaticResource TelemetryLabel}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <TextBlock Text="{Binding StorageChipText}" VerticalAlignment="Center" FontSize="12">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsStorageLow}" Value="True">
+                                                    <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource StatusPill}" Padding="9,5"
+                                ToolTip="Phone temperature. A hot sensor adds thermal noise to every frame, which stacking cannot remove.">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="TEMP" Style="{StaticResource TelemetryLabel}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <TextBlock Text="{Binding PhoneTemperatureChipText}" VerticalAlignment="Center" FontSize="12">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsPhoneHot}" Value="True">
+                                                    <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+                    </ItemsControl>
+
                     <Border Style="{StaticResource StatusPill}"
                             Padding="11,6"
                             Margin="0,0,8,0">

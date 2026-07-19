@@ -188,11 +188,32 @@ public sealed class AdbService : IAdbCommandExecutor, IAdbDeviceClient, IAdbWire
 
         if (connected.Count > 1)
         {
+            // One phone plugged in and also paired over Wi-Fi appears twice, and
+            // being told to choose between two views of the same handset is a
+            // choice with no meaning. Collapse those first; only genuinely
+            // different phones are worth stopping for.
+            IReadOnlyList<AdbDevice> distinct = PhysicalDeviceIdentity.Collapse(connected);
+            if (distinct.Count == 1)
+            {
+                AdbDevice chosen = distinct[0];
+                bool overCable =
+                    Scrcpy.DeviceTransportDetector.Detect(chosen.Serial) ==
+                    Scrcpy.DeviceTransport.Cable;
+
+                return new AdbConnectionSnapshot(
+                    AdbConnectionState.Connected,
+                    devices,
+                    chosen,
+                    overCable
+                        ? $"{chosen.DisplayName} connected by cable, also paired wirelessly."
+                        : $"{chosen.DisplayName} connected.");
+            }
+
             return new AdbConnectionSnapshot(
                 AdbConnectionState.MultipleDevices,
                 devices,
                 null,
-                "Multiple authorized Android devices are connected. Select one to continue.");
+                $"{distinct.Count} different Android devices are connected. Pick one under DEVICE to continue.");
         }
 
         if (devices.Any(static device => device.State == AdbDeviceState.Unauthorized))
