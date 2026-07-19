@@ -112,7 +112,6 @@ public static class AstrophotographyPlanner
         AstronomyConditions? astronomy,
         LightPollutionConditions? lightPollution)
     {
-        double cloud = ScoreLowerIsBetter(weather.CloudCoverPercent, 1.4);
         double precipitation = ScoreLowerIsBetter(
             weather.PrecipitationProbabilityPercent,
             1.5);
@@ -130,24 +129,24 @@ public static class AstrophotographyPlanner
         double moon = ScoreMoon(sessionType, weather.Time, astronomy);
         double skyglow = ScoreLightPollution(sessionType, lightPollution);
 
-        // Weather only. Sky darkness is deliberately not a term here: it is not
-        // one ingredient among several, it decides whether the target is
-        // reachable at all, and it is applied afterwards.
-        double weatherScore = sessionType is SessionType.Moon or SessionType.Planet
-            ? (cloud * 0.39) +
-              (precipitation * 0.18) +
-              (visibility * 0.12) +
-              (moisture * 0.10) +
-              (wind * 0.13) +
-              (moon * 0.08)
-            : (cloud * 0.33) +
-              (precipitation * 0.11) +
-              (visibility * 0.11) +
-              (moisture * 0.17) +
-              (wind * 0.11) +
-              (moon * 0.17);
+        // Weather only, and cloud is deliberately not a term here either. Sky
+        // darkness is applied after this because it is not weather; cloud is
+        // applied to this because it is. Both are gates rather than ingredients:
+        // neither trades off against how still or dry the air is.
+        double conditions = sessionType is SessionType.Moon or SessionType.Planet
+            ? (precipitation * 0.30) +
+              (visibility * 0.20) +
+              (moisture * 0.16) +
+              (wind * 0.21) +
+              (moon * 0.13)
+            : (precipitation * 0.16) +
+              (visibility * 0.16) +
+              (moisture * 0.26) +
+              (wind * 0.16) +
+              (moon * 0.26);
 
-        double score = Clamp(weatherScore) * SkyglowFactor(sessionType, skyglow);
+        double weatherScore = Clamp(conditions) * CloudFactor(weather.CloudCoverPercent);
+        double score = weatherScore * SkyglowFactor(sessionType, skyglow);
 
         return new ScoredHour(
             weather.Time,
@@ -200,6 +199,44 @@ public static class AstrophotographyPlanner
                Math.Abs((nearest.Time - time).TotalMinutes) <= 90
             ? nearest.AltitudeDegrees
             : astronomy?.MoonAltitudeDegrees;
+    }
+
+    /// <summary>
+    /// Multiplier applied to the weather score for the forecast cloud cover.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Cloud used to be the heaviest weighted term, which sounds severe but was
+    /// not: at 95% cover it forfeited its own third of the total while the
+    /// remaining two thirds paid out in full, so a fully overcast night at a dark
+    /// site still rated 62 and was reported as fair. Nothing is shootable through
+    /// solid overcast, whatever the wind and humidity are doing, so cloud belongs
+    /// in the same category as sky brightness: a gate on the result rather than
+    /// an ingredient trading off against the others.
+    /// </para>
+    /// <para>
+    /// The curve is superlinear because broken cloud costs more than the fraction
+    /// of sky it covers. Frames are minutes long and the cloud drifts, so a third
+    /// of the sky covered ruins well over a third of the exposures, and every
+    /// ruined frame has to be found and thrown out of the stack.
+    /// </para>
+    /// <para>
+    /// A forecast reports how much sky is covered, never how thick the cloud is,
+    /// so cover is treated as opaque. That is wrong for the thin high haze the
+    /// Moon punches straight through, and the error is deliberately on the
+    /// pessimistic side: being told to stay in on a night that turned out usable
+    /// costs less than driving to a dark site under cloud.
+    /// </para>
+    /// </remarks>
+    public static double CloudFactor(double? cloudCoverPercent)
+    {
+        if (cloudCoverPercent is null)
+        {
+            return 0.85;
+        }
+
+        double covered = Math.Clamp(cloudCoverPercent.Value / 100.0, 0, 1);
+        return Math.Pow(1 - covered, 1.4);
     }
 
     /// <summary>

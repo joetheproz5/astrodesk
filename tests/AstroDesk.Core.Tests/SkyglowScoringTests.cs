@@ -95,14 +95,85 @@ public sealed class SkyglowScoringTests
             overcast.Score < clear.Score - 20,
             $"overcast {overcast.Score} should be far below clear {clear.Score}");
         Assert.NotEqual(ObservingQuality.Excellent, overcast.Quality);
-
-        // Note: overcast still rates around 62 here, because cloud is a weighted
-        // term rather than a gate - at 95% cover it forfeits its own weight while
-        // the remaining two thirds pay out in full. That is the same structural
-        // problem this class fixes for sky brightness, and it is deliberately not
-        // addressed here; the assertion above is what holds today rather than
-        // what arguably should.
     }
+
+    [Fact]
+    public void AnOvercastNightAtADarkSiteIsNotWorthDrivingTo()
+    {
+        // The case cloud gating exists for. While cloud was a weighted term this
+        // rated 62 and read as "Fair" at 95% cover, because cloud forfeited only
+        // its own third while the rest of the terms paid out in full.
+        ObservingPlan plan = Plan(SessionType.MilkyWay, zone: "1", cloud: 95);
+
+        Assert.Equal(ObservingQuality.Poor, plan.Quality);
+        Assert.True(plan.Score < 15, $"a 95% overcast night should not rate {plan.Score}/100");
+    }
+
+    [Fact]
+    public void CloudIsReportedAsWeatherRatherThanSkyBrightness()
+    {
+        // Cloud gates the weather score itself, unlike sky brightness which gates
+        // the total. If it did not, the weather readout would stay in the high
+        // nineties under solid overcast and simply be untrue.
+        ObservingPlan overcast = Plan(SessionType.MilkyWay, zone: "1", cloud: 95);
+
+        Assert.True(
+            overcast.WeatherScore < 15,
+            $"the weather score should reflect the cloud, was {overcast.WeatherScore}");
+    }
+
+    [Fact]
+    public void SolidOvercastIsPoorEvenForTheMoon()
+    {
+        // Sky brightness is target-dependent; cloud is not. The Moon is shot from
+        // city centres but not through a closed lid.
+        ObservingPlan plan = Plan(SessionType.Moon, zone: "6a", cloud: 98);
+
+        Assert.Equal(ObservingQuality.Poor, plan.Quality);
+    }
+
+    [Fact]
+    public void BrokenCloudCostsMoreThanTheFractionOfSkyItCovers()
+    {
+        // Frames are minutes long and the cloud drifts, so half the sky covered
+        // ruins well over half the exposures.
+        Assert.True(
+            AstrophotographyPlanner.CloudFactor(50) < 0.5,
+            $"was {AstrophotographyPlanner.CloudFactor(50)}");
+
+        Assert.Equal(1.0, AstrophotographyPlanner.CloudFactor(0), 3);
+        Assert.Equal(0.0, AstrophotographyPlanner.CloudFactor(100), 3);
+    }
+
+    [Fact]
+    public void CloudGatingIsMonotonic()
+    {
+        // More cloud must never score better, at any point on the curve.
+        for (int percent = 0; percent < 100; percent += 5)
+        {
+            Assert.True(
+                AstrophotographyPlanner.CloudFactor(percent) >
+                AstrophotographyPlanner.CloudFactor(percent + 5),
+                $"{percent}% did not beat {percent + 5}%");
+        }
+    }
+
+    [Fact]
+    public void AClearNightIsBarelyPenalisedForCloud()
+    {
+        // The gate must not quietly tax good nights: this is the common case and
+        // it has to keep reading as excellent.
+        ObservingPlan plan = Plan(SessionType.MilkyWay, zone: "1", cloud: 2);
+
+        Assert.Equal(ObservingQuality.Excellent, plan.Quality);
+        Assert.True(plan.Score >= 85, $"a clear dark night should rate highly, got {plan.Score}");
+    }
+
+    [Fact]
+    public void UnknownCloudIsAssumedMostlyClearButNotCertain() =>
+        // Missing data must not read as a guaranteed clear sky, nor bury an
+        // otherwise fine forecast.
+        Assert.InRange(AstrophotographyPlanner.CloudFactor(null), 0.7, 0.95);
 
     [Theory]
     [InlineData(SessionType.MilkyWay, 1.0)]
