@@ -54,13 +54,26 @@ public sealed record StackFrame(string Path, DateTimeOffset CapturedAt)
 /// <param name="Method">How to combine the registered frames.</param>
 /// <param name="SigmaLow">Low rejection threshold, used only for sigma clipping.</param>
 /// <param name="SigmaHigh">High rejection threshold, used only for sigma clipping.</param>
+/// <param name="DarksDirectory">
+/// Folder of dark frames to calibrate with, or null to stack uncalibrated.
+/// </param>
+/// <remarks>
+/// A dark frame is an exposure of the same length, ISO and temperature with no
+/// light reaching the sensor. Averaging a set of them gives a map of what the
+/// sensor produces on its own - hot pixels and thermal glow - which subtracts
+/// out of every light frame. Stacking reduces random noise but cannot touch
+/// this, because it is the same in every frame and averaging preserves it
+/// perfectly. On a phone sensor running warm it is often the largest remaining
+/// artefact.
+/// </remarks>
 public sealed record StackRequest(
     string WorkingDirectory,
     string FrameExtension,
     string OutputName = "stacked",
     StackMethod Method = StackMethod.AverageSigmaClip,
     double SigmaLow = 3.0,
-    double SigmaHigh = 3.0);
+    double SigmaHigh = 3.0,
+    string? DarksDirectory = null);
 
 /// <summary>
 /// Outcome of a stacking run.

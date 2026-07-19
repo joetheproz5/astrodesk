@@ -63,11 +63,19 @@ public static class SirilScriptBuilder
         script.AppendLine($"requires {RequiredVersion}");
         script.AppendLine();
 
-        // Convert whatever the phone produced into a Siril sequence. -debayer
-        // matters for DNG: the sensor data is a Bayer mosaic and must be
-        // interpolated to colour before frames can be compared or combined.
+        bool raw = IsRawExtension(extension);
+        bool calibrating = HasDarks(request);
+
+        // Convert whatever the phone produced into a Siril sequence.
+        //
+        // -debayer interpolates the Bayer mosaic to colour, and it belongs at
+        // convert time only when nothing else will do it. With darks it has to
+        // wait: a dark must be subtracted from the raw mosaic, before
+        // interpolation mixes neighbouring photosites together, so calibrate
+        // does the debayering instead. Debayering here as well would apply it
+        // twice and ruin the frames.
         script.Append("convert ").Append(ConvertName).Append(" -out=.");
-        if (IsRawExtension(extension))
+        if (raw && !calibrating)
         {
             script.Append(" -debayer");
         }
@@ -75,11 +83,22 @@ public static class SirilScriptBuilder
         script.AppendLine();
         script.AppendLine($"cd .");
 
+        // Calibrate against a master dark when one is available. Siril prefixes
+        // calibrated frames with pp_, so everything downstream shifts.
+        string sequence = SequenceName;
+        if (calibrating)
+        {
+            script.AppendLine();
+            AppendDarkCalibration(script, raw);
+            sequence = $"pp_{SequenceName}";
+            script.AppendLine();
+        }
+
         // Global star alignment. This is the step that defeats sky rotation.
-        script.AppendLine($"register {SequenceName}");
+        script.AppendLine($"register {sequence}");
 
         // Stack the registered sequence. Siril prefixes registered output with r_.
-        script.AppendLine(BuildStackCommand($"r_{SequenceName}", request, method));
+        script.AppendLine(BuildStackCommand($"r_{sequence}", request, method));
 
         // Autostretch on save only affects the preview copy, not the linear data.
         script.AppendLine($"load {request.OutputName}");
@@ -88,6 +107,66 @@ public static class SirilScriptBuilder
         script.AppendLine("close");
 
         return script.ToString();
+    }
+
+    /// <summary>
+    /// Folder name holding the dark frames inside a run.
+    /// </summary>
+    public const string DarksFolderName = "darks";
+
+    /// <summary>
+    /// Base name handed to Siril's <c>convert</c> for the darks.
+    /// </summary>
+    public const string DarkConvertName = "dark";
+
+    public const string MasterDarkName = "master_dark";
+
+    /// <summary>
+    /// True when the request has a usable set of darks.
+    /// </summary>
+    public static bool HasDarks(StackRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return !string.IsNullOrWhiteSpace(request.DarksDirectory);
+    }
+
+    /// <summary>
+    /// Builds a master dark and subtracts it from the light frames.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The darks are converted and stacked inside their own folder, and only
+    /// then referenced from the working directory. Converting them alongside the
+    /// lights would be simpler and wrong: Siril's <c>convert</c> takes every
+    /// convertible file in the current directory, so the darks would be swept
+    /// into the light sequence and averaged into the result as though they were
+    /// exposures of the sky.
+    /// </para>
+    /// <para>
+    /// The master is a plain rejection stack with normalisation off. Normalising
+    /// darks would scale away the very offsets the calibration exists to
+    /// measure.
+    /// </para>
+    /// </remarks>
+    private static void AppendDarkCalibration(StringBuilder script, bool raw)
+    {
+        script.AppendLine($"cd {DarksFolderName}");
+        script.AppendLine($"convert {DarkConvertName} -out=.");
+        script.AppendLine($"stack {DarkConvertName}_ rej 3 3 -nonorm -out={MasterDarkName}");
+        script.AppendLine("cd ..");
+
+        script.Append("calibrate ").Append(SequenceName)
+            .Append(" -dark=").Append(DarksFolderName).Append('/').Append(MasterDarkName);
+
+        // A raw frame is still a Bayer mosaic at this point, so the calibration
+        // has to be told it is working on one, and it takes over the debayering
+        // that convert would otherwise have done.
+        if (raw)
+        {
+            script.Append(" -cfa -equalize_cfa -debayer");
+        }
+
+        script.AppendLine();
     }
 
     /// <summary>

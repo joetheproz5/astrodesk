@@ -881,6 +881,39 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     }
 
     /// <summary>
+    /// The run's dark frames, if it has any.
+    /// </summary>
+    /// <remarks>
+    /// Detected rather than configured: a folder named "darks" beside the light
+    /// frames is where they land, and finding it automatically means an existing
+    /// run gains calibration simply by having darks dropped into it. An empty
+    /// folder is ignored, because handing Siril a darks directory with nothing in
+    /// it fails the whole run at the calibration step rather than skipping it.
+    /// </remarks>
+    private static string? FindDarksFolder(string sessionFolder)
+    {
+        if (string.IsNullOrWhiteSpace(sessionFolder))
+        {
+            return null;
+        }
+
+        string darks = Path.Combine(sessionFolder, SirilScriptBuilder.DarksFolderName);
+        if (!Directory.Exists(darks))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Directory.EnumerateFiles(darks).Any() ? darks : null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Asks the view for a yes/no answer.
     /// </summary>
     /// <remarks>
@@ -3976,7 +4009,10 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             var progress = new Progress<string>(line => StackResultText = line);
             StackResult result = await _stackEngine
                 .StackAsync(
-                    new StackRequest(_stackSession.SessionFolder, extension),
+                    new StackRequest(
+                        _stackSession.SessionFolder,
+                        extension,
+                        DarksDirectory: FindDarksFolder(_stackSession.SessionFolder)),
                     progress,
                     _lifetimeCancellation.Token)
                 .ConfigureAwait(true);
