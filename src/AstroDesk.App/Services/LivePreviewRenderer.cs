@@ -13,9 +13,10 @@ namespace AstroDesk.App.Services;
 /// <remarks>
 /// <see cref="LivePreviewStacker"/> is deliberately free of WPF so it can be
 /// tested without a dispatcher, which leaves decoding and rendering to live
-/// here. Frames are decoded small and in greyscale: the preview only has to
-/// answer "is tonight's run working", and doing that on a 50 megapixel colour
-/// frame would cost far more than the answer is worth.
+/// here. Frames are decoded small: the preview only has to answer "is tonight's
+/// run working", and doing that at 50 megapixels would cost far more than the
+/// answer is worth. They are decoded in colour, because a cast is itself
+/// diagnostic - it is how skyglow and a bad white balance announce themselves.
 /// </remarks>
 public interface ILivePreviewRenderer
 {
@@ -23,8 +24,8 @@ public interface ILivePreviewRenderer
     int TargetWidth { get; }
 
     /// <summary>
-    /// Decodes a captured file into a greyscale preview frame, or null when the
-    /// file cannot be read as an image.
+    /// Decodes a captured file into an RGB preview frame, or null when the file
+    /// cannot be read as an image.
     /// </summary>
     PreviewImage? Decode(string path);
 
@@ -60,7 +61,7 @@ public sealed class LivePreviewRenderer(ILogger<LivePreviewRenderer>? logger = n
         try
         {
             BitmapSource source = LoadDownscaled(path, TargetWidth);
-            return ToGreyscale(source);
+            return ToRgb(source);
         }
         catch (Exception exception) when (IsUnreadable(exception))
         {
@@ -98,6 +99,14 @@ public sealed class LivePreviewRenderer(ILogger<LivePreviewRenderer>? logger = n
         // Normalise to the actual range so a faint sky is still visible. The
         // stack is linear, and linear astronomical data is almost black until
         // it is stretched.
+        //
+        // The same black and white points are applied to every channel, taken
+        // from luminance. Stretching each channel to its own range would silently
+        // white-balance the image: it would neutralise the orange cast of a
+        // light-polluted sky, but equally it would neutralise a genuinely red
+        // target, and it would hide one channel clipping. For a preview whose job
+        // is to answer whether the frames are usable, a faithful cast is more
+        // informative than a flattering one.
         (float black, float white) = FindRange(image);
         float span = white - black;
         if (span <= float.Epsilon)
@@ -105,11 +114,27 @@ public sealed class LivePreviewRenderer(ILogger<LivePreviewRenderer>? logger = n
             span = 1f;
         }
 
-        byte[] pixels = new byte[image.Pixels.Length];
-        for (int index = 0; index < pixels.Length; index++)
+        if (!image.IsColour)
         {
-            float normalised = (image.Pixels[index] - black) / span;
-            pixels[index] = (byte)Math.Clamp(normalised * 255f, 0f, 255f);
+            byte[] grey = new byte[image.Pixels.Length];
+            for (int index = 0; index < grey.Length; index++)
+            {
+                grey[index] = Stretch(image.Pixels[index], black, span);
+            }
+
+            return Freeze(
+                BitmapSource.Create(
+                    image.Width, image.Height, 96, 96, PixelFormats.Gray8, null, grey, image.Width));
+        }
+
+        // Back to BGR for WPF.
+        byte[] pixels = new byte[image.Pixels.Length];
+        for (int index = 0; index < image.Width * image.Height; index++)
+        {
+            int offset = index * 3;
+            pixels[offset] = Stretch(image.Pixels[offset + 2], black, span);
+            pixels[offset + 1] = Stretch(image.Pixels[offset + 1], black, span);
+            pixels[offset + 2] = Stretch(image.Pixels[offset], black, span);
         }
 
         BitmapSource bitmap = BitmapSource.Create(
@@ -117,10 +142,10 @@ public sealed class LivePreviewRenderer(ILogger<LivePreviewRenderer>? logger = n
             image.Height,
             96,
             96,
-            PixelFormats.Gray8,
+            PixelFormats.Bgr24,
             null,
             pixels,
-            image.Width);
+            image.Width * 3);
 
         // Frozen so it can cross from the decode thread to the UI thread.
         bitmap.Freeze();
@@ -176,24 +201,44 @@ public sealed class LivePreviewRenderer(ILogger<LivePreviewRenderer>? logger = n
         exception is NotSupportedException or FileFormatException or IOException
             or ArgumentException or OverflowException or InvalidOperationException;
 
-    private static PreviewImage ToGreyscale(BitmapSource source)
+    /// <summary>
+    /// Decodes into an RGB preview frame.
+    /// </summary>
+    /// <remarks>
+    /// WPF gives BGR byte order, which is reversed here so the stack holds plain
+    /// RGB and nothing downstream has to remember the channel order.
+    /// </remarks>
+    private static PreviewImage ToRgb(BitmapSource source)
     {
-        var converted = new FormatConvertedBitmap(source, PixelFormats.Gray8, null, 0);
+        var converted = new FormatConvertedBitmap(source, PixelFormats.Bgr24, null, 0);
         converted.Freeze();
 
         int width = converted.PixelWidth;
         int height = converted.PixelHeight;
-        int stride = width;
+        int stride = width * 3;
         byte[] bytes = new byte[stride * height];
         converted.CopyPixels(bytes, stride, 0);
 
-        float[] pixels = new float[width * height];
-        for (int index = 0; index < pixels.Length; index++)
+        float[] pixels = new float[width * height * PreviewImage.Rgb];
+        for (int index = 0; index < width * height; index++)
         {
-            pixels[index] = bytes[index];
+            int source24 = index * 3;
+            pixels[source24] = bytes[source24 + 2];
+            pixels[source24 + 1] = bytes[source24 + 1];
+            pixels[source24 + 2] = bytes[source24];
         }
 
-        return new PreviewImage(width, height, pixels);
+        return new PreviewImage(width, height, pixels, PreviewImage.Rgb);
+    }
+
+    private static byte Stretch(float value, float black, float span) =>
+        (byte)Math.Clamp((value - black) / span * 255f, 0f, 255f);
+
+    private static BitmapSource Freeze(BitmapSource bitmap)
+    {
+        // Frozen so it can cross from the decode thread to the UI thread.
+        bitmap.Freeze();
+        return bitmap;
     }
 
     /// <summary>
@@ -201,9 +246,14 @@ public sealed class LivePreviewRenderer(ILogger<LivePreviewRenderer>? logger = n
     /// extremes, so one hot pixel or a single satellite streak cannot flatten
     /// the whole image.
     /// </summary>
+    /// <remarks>
+    /// Measured on luminance rather than on the raw samples so that the range is
+    /// one shared stretch across the channels, and so a colour frame does not
+    /// cost three times the sort.
+    /// </remarks>
     private static (float Black, float White) FindRange(PreviewImage image)
     {
-        float[] sorted = [.. image.Pixels];
+        float[] sorted = [.. image.Luminance];
         Array.Sort(sorted);
 
         int low = (int)(sorted.Length * 0.02);

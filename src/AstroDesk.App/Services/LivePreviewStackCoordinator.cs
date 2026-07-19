@@ -133,7 +133,7 @@ public sealed class LivePreviewStackCoordinator : ILivePreviewStackCoordinator
             // The first frame fixes the working size; the phone does not change
             // resolution mid-session, and a mismatch is rejected rather than
             // silently resampled.
-            _stacker ??= new LivePreviewStacker(frame.Width, frame.Height);
+            _stacker ??= new LivePreviewStacker(frame.Width, frame.Height, frame.Channels);
             stacker = _stacker;
         }
 
@@ -145,11 +145,13 @@ public sealed class LivePreviewStackCoordinator : ILivePreviewStackCoordinator
         catch (ArgumentException)
         {
             // A different-sized frame means the source changed; start over
-            // rather than refusing every remaining frame.
-            _logger.LogInformation("Preview frame size changed; restarting the live stack.");
+            // rather than refusing every remaining frame. The channel count has
+            // to be carried over too: rebuilding at the default would reject the
+            // very frame that triggered the rebuild, on every frame thereafter.
+            _logger.LogInformation("Preview frame shape changed; restarting the live stack.");
             lock (_sync)
             {
-                _stacker = new LivePreviewStacker(frame.Width, frame.Height);
+                _stacker = new LivePreviewStacker(frame.Width, frame.Height, frame.Channels);
                 stacker = _stacker;
             }
 

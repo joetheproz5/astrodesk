@@ -1,17 +1,84 @@
 namespace AstroDesk.Stacking;
 
 /// <summary>
-/// A single-channel image at working resolution, used for the running preview.
+/// An image at working resolution, used for the running preview.
 /// </summary>
-public sealed class PreviewImage(int width, int height, float[] pixels)
+/// <remarks>
+/// Carries either one channel or three interleaved as RGB. A separate luminance
+/// plane is built once up front because alignment reads it many thousands of
+/// times per frame: collapsing three channels inside that loop would make the
+/// search several times more expensive for a number that never changes.
+/// </remarks>
+public sealed class PreviewImage
 {
-    public int Width { get; } = width;
+    public const int Greyscale = 1;
+    public const int Rgb = 3;
 
-    public int Height { get; } = height;
+    public PreviewImage(int width, int height, float[] pixels, int channels = Greyscale)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(width, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(height, 1);
+        ArgumentNullException.ThrowIfNull(pixels);
 
-    public float[] Pixels { get; } = pixels;
+        if (channels is not (Greyscale or Rgb))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(channels),
+                channels,
+                "A preview frame must be greyscale or RGB.");
+        }
 
-    public float this[int x, int y] => Pixels[(y * Width) + x];
+        if (pixels.Length != width * height * channels)
+        {
+            throw new ArgumentException(
+                $"Expected {width * height * channels} samples for a {width}x{height} " +
+                $"image with {channels} channel(s), got {pixels.Length}.",
+                nameof(pixels));
+        }
+
+        Width = width;
+        Height = height;
+        Channels = channels;
+        Pixels = pixels;
+        Luminance = channels == Greyscale ? pixels : BuildLuminance(pixels, width * height);
+    }
+
+    public int Width { get; }
+
+    public int Height { get; }
+
+    public int Channels { get; }
+
+    /// <summary>Samples, interleaved when there is more than one channel.</summary>
+    public float[] Pixels { get; }
+
+    /// <summary>
+    /// One sample per pixel. Aliases <see cref="Pixels"/> when greyscale.
+    /// </summary>
+    public float[] Luminance { get; }
+
+    public bool IsColour => Channels == Rgb;
+
+    /// <summary>Luminance at a pixel. This is what alignment works on.</summary>
+    public float this[int x, int y] => Luminance[(y * Width) + x];
+
+    public float this[int x, int y, int channel] =>
+        Pixels[(((y * Width) + x) * Channels) + channel];
+
+    private static float[] BuildLuminance(float[] pixels, int pixelCount)
+    {
+        float[] luminance = new float[pixelCount];
+        for (int index = 0; index < pixelCount; index++)
+        {
+            int source = index * Rgb;
+            luminance[index] =
+                (pixels[source] * 0.299f) +
+                (pixels[source + 1] * 0.587f) +
+                (pixels[source + 2] * 0.114f);
+        }
+
+        return luminance;
+    }
 }
 
 /// <summary>
@@ -43,6 +110,7 @@ public sealed class LivePreviewStacker
 
     private readonly int _width;
     private readonly int _height;
+    private readonly int _channels;
     private readonly double[] _accumulator;
 
     /// <summary>
@@ -58,14 +126,25 @@ public sealed class LivePreviewStacker
 
     private PreviewImage? _reference;
 
-    public LivePreviewStacker(int width, int height)
+    public LivePreviewStacker(int width, int height, int channels = PreviewImage.Greyscale)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(width, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(height, 1);
+        if (channels is not (PreviewImage.Greyscale or PreviewImage.Rgb))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(channels),
+                channels,
+                "A preview stack must be greyscale or RGB.");
+        }
 
         _width = width;
         _height = height;
-        _accumulator = new double[width * height];
+        _channels = channels;
+        _accumulator = new double[width * height * channels];
+
+        // One count per pixel, not per sample: every channel of a pixel is
+        // covered by exactly the same set of frames.
         _counts = new int[width * height];
     }
 
@@ -81,6 +160,13 @@ public sealed class LivePreviewStacker
         {
             throw new ArgumentException(
                 $"Frame must be {_width}x{_height} to match the preview accumulator.",
+                nameof(frame));
+        }
+
+        if (frame.Channels != _channels)
+        {
+            throw new ArgumentException(
+                $"Frame has {frame.Channels} channel(s) but the stack has {_channels}.",
                 nameof(frame));
         }
 
@@ -111,15 +197,19 @@ public sealed class LivePreviewStacker
         }
 
         float[] pixels = new float[_accumulator.Length];
-        for (int index = 0; index < pixels.Length; index++)
+        for (int pixel = 0; pixel < _counts.Length; pixel++)
         {
-            int contributions = _counts[index];
-            pixels[index] = contributions == 0
-                ? 0f
-                : (float)(_accumulator[index] / contributions);
+            int contributions = _counts[pixel];
+            for (int channel = 0; channel < _channels; channel++)
+            {
+                int index = (pixel * _channels) + channel;
+                pixels[index] = contributions == 0
+                    ? 0f
+                    : (float)(_accumulator[index] / contributions);
+            }
         }
 
-        return new PreviewImage(_width, _height, pixels);
+        return new PreviewImage(_width, _height, pixels, _channels);
     }
 
     public void Reset()
@@ -210,9 +300,14 @@ public sealed class LivePreviewStacker
                     continue;
                 }
 
-                int index = (y * _width) + x;
-                _accumulator[index] += frame[sourceX, sourceY];
-                _counts[index]++;
+                int pixel = (y * _width) + x;
+                for (int channel = 0; channel < _channels; channel++)
+                {
+                    _accumulator[(pixel * _channels) + channel] +=
+                        frame[sourceX, sourceY, channel];
+                }
+
+                _counts[pixel]++;
             }
         }
     }
