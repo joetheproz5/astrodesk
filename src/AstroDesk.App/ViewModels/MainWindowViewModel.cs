@@ -777,6 +777,113 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public bool IsPlan => CurrentPage == "Plan";
 
+    public bool IsLibrary => CurrentPage == "Library";
+
+    // ---------------------------------------------------------------- library
+
+    public ObservableCollection<CaptureRunSummary> LibraryRuns { get; } = [];
+
+    [ObservableProperty]
+    private string _librarySummary = "Nothing captured yet.";
+
+    [RelayCommand]
+    private void RefreshLibrary()
+    {
+        LibraryRuns.Clear();
+
+        IReadOnlyList<CaptureRunSummary> runs = CaptureLibrary.Scan(PhoneCaptureFolder);
+        foreach (CaptureRunSummary run in runs)
+        {
+            LibraryRuns.Add(run);
+        }
+
+        long total = CaptureLibrary.TotalBytes(runs);
+        int frames = runs.Sum(run => run.FrameCount);
+        LibrarySummary = runs.Count == 0
+            ? $"Nothing captured yet in {PhoneCaptureFolder}."
+            : $"{runs.Count} run(s) · {frames} frame(s) · {CaptureLibrary.FormatSize(total)} in {PhoneCaptureFolder}";
+    }
+
+    /// <summary>
+    /// Asks the view for a yes/no answer.
+    /// </summary>
+    /// <remarks>
+    /// Returns false when nothing is listening, so a host without a UI cannot
+    /// silently approve a deletion by default.
+    /// </remarks>
+    private async Task<bool> RequestConfirmationAsync(string title, string message)
+    {
+        if (ConfirmationRequested is null)
+        {
+            return false;
+        }
+
+        ConfirmationRequestEventArgs request = new(title, message);
+        ConfirmationRequested.Invoke(this, request);
+        return await request.Completion.ConfigureAwait(true);
+    }
+
+    [RelayCommand]
+    private void OpenRunFolder(CaptureRunSummary? run)
+    {
+        if (run is null || !Directory.Exists(run.FolderPath))
+        {
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo(run.FolderPath) { UseShellExecute = true });
+    }
+
+    /// <summary>
+    /// Deletes a run's folder after confirming it.
+    /// </summary>
+    /// <remarks>
+    /// Always asks, and names the size being freed, because this is the one
+    /// action in the app that destroys captures rather than producing them.
+    /// The loose-captures entry is refused outright: its folder is the capture
+    /// root, so deleting it would take every original with it.
+    /// </remarks>
+    [RelayCommand]
+    private async Task DeleteRunAsync(CaptureRunSummary? run)
+    {
+        if (run is null)
+        {
+            return;
+        }
+
+        if (run.IsLooseCaptures)
+        {
+            StatusMessage =
+                "Loose captures sit in the capture folder itself, so they are not deleted from here. " +
+                "Remove individual files in Explorer instead.";
+            return;
+        }
+
+        bool confirmed = await RequestConfirmationAsync(
+            "Delete this capture run?",
+            $"'{run.Name}' holds {run.FrameCount} frame(s) and " +
+            $"{CaptureLibrary.FormatSize(run.TotalBytes)}.\n\n" +
+            "The folder and everything in it will be deleted. This cannot be undone.")
+            .ConfigureAwait(true);
+
+        if (!confirmed)
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(run.FolderPath, recursive: true);
+            StatusMessage = $"Deleted {run.Name}, freeing {CaptureLibrary.FormatSize(run.TotalBytes)}.";
+            RefreshLibrary();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(exception, "Could not delete {Folder}.", run.FolderPath);
+            StatusMessage = $"Could not delete {run.Name}: {exception.Message}";
+        }
+    }
+
     // ------------------------------------------------------------------- plan
 
     /// <summary>
@@ -1025,6 +1132,16 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     [RelayCommand]
     private void ShowPlan() => CurrentPage = "Plan";
+
+    [RelayCommand]
+    private void ShowLibrary()
+    {
+        CurrentPage = "Library";
+
+        // Scanned on entry rather than kept live: captures arrive throughout a
+        // session, and a listing that is only read when looked at cannot go stale.
+        RefreshLibrary();
+    }
 
     /// <summary>
     /// Re-centres the map on the site currently being planned.
@@ -2383,16 +2500,10 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        ConfirmationRequestEventArgs request = new(
-            "Delete shooting session",
-            $"Delete the session “{SelectedHistorySession.Target}”? The database record will be removed; exported files are left in place for recovery.");
-        if (ConfirmationRequested is null)
-        {
-            return;
-        }
-
-        ConfirmationRequested.Invoke(this, request);
-        if (!await request.Completion.ConfigureAwait(true))
+        if (!await RequestConfirmationAsync(
+                "Delete shooting session",
+                $"Delete the session “{SelectedHistorySession.Target}”? The database record will be removed; exported files are left in place for recovery.")
+            .ConfigureAwait(true))
         {
             return;
         }
@@ -2518,6 +2629,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(IsStacking));
         OnPropertyChanged(nameof(IsSky));
         OnPropertyChanged(nameof(IsPlan));
+        OnPropertyChanged(nameof(IsLibrary));
     }
 
     partial void OnShowNightBriefDrawerChanged(bool value)

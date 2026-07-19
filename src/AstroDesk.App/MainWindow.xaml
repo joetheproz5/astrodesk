@@ -19,6 +19,8 @@
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
         <controls:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVisibility" />
         <controls:BooleanNegationConverter x:Key="BooleanNegation" />
+        <controls:ByteSizeConverter x:Key="ByteSize" />
+        <controls:CapturePreviewConverter x:Key="CapturePreview" />
     </Window.Resources>
 
     <!-- Three rows: header, workspace, status line. The code-behind collapses the
@@ -127,6 +129,20 @@
                             <Style TargetType="Button" BasedOn="{StaticResource TouchNavButton}">
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsSky}" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource PanelRaisedBrush}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource PanelBorderBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                    <Button Content="Library"
+                            Command="{Binding ShowLibraryCommand}"
+                            Margin="0,0,4,0">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource TouchNavButton}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsLibrary}" Value="True">
                                         <Setter Property="Background" Value="{DynamicResource PanelRaisedBrush}" />
                                         <Setter Property="BorderBrush" Value="{DynamicResource PanelBorderBrush}" />
                                     </DataTrigger>
@@ -1610,6 +1626,108 @@
                  over a session. Averaging them unregistered yields trails, not a
                  cleaner image, which is why the heavy lifting is handed to Siril
                  for star-based registration before integration. -->
+            <!-- LIBRARY — what previous sessions have left on disk.
+                 Raw frames are ~28 MB each and a stacked result can exceed a
+                 hundred, so a few nights fill a laptop. Nothing in the app could
+                 see any of it, so the only way to find out was Explorer. -->
+            <Grid Visibility="{Binding IsLibrary, Converter={StaticResource BoolToVisibility}}"
+                  Margin="18,16,18,16">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="12" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <DockPanel Grid.Row="0" LastChildFill="False">
+                    <StackPanel DockPanel.Dock="Left">
+                        <TextBlock Text="CAPTURE LIBRARY" Style="{StaticResource RailHeader}" Margin="0" />
+                        <TextBlock Text="{Binding LibrarySummary}"
+                                   Style="{StaticResource TelemetrySub}"
+                                   TextTrimming="CharacterEllipsis"
+                                   Margin="0,3,0,0" />
+                    </StackPanel>
+                    <Button DockPanel.Dock="Right"
+                            Content="Rescan"
+                            Command="{Binding RefreshLibraryCommand}"
+                            Style="{StaticResource PanelButton}"
+                            MinHeight="30"
+                            Padding="11,4"
+                            VerticalAlignment="Center" />
+                </DockPanel>
+
+                <ScrollViewer Grid.Row="2"
+                              HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto"
+                              PanningMode="VerticalFirst"
+                              PanningDeceleration="0.0015"
+                              PanningRatio="1">
+                    <ItemsControl ItemsSource="{Binding LibraryRuns}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource PanelCard}"
+                                        Padding="13,10"
+                                        Margin="0,0,0,9">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <Border Grid.Column="0"
+                                                Width="92"
+                                                Height="62"
+                                                Margin="0,0,13,0"
+                                                Background="{DynamicResource PreviewBackgroundBrush}"
+                                                BorderBrush="{DynamicResource PanelBorderBrush}"
+                                                BorderThickness="1"
+                                                ClipToBounds="True">
+                                            <Image Source="{Binding PreviewFramePath, Converter={StaticResource CapturePreview}}"
+                                                   Stretch="UniformToFill" />
+                                        </Border>
+
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Name}"
+                                                       FontSize="14"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource PrimaryTextBrush}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Style="{StaticResource TelemetrySub}" Margin="0,3,0,0">
+                                                <Run Text="{Binding FrameCount, Mode=OneWay}" />
+                                                <Run Text="frames · " />
+                                                <Run Text="{Binding TotalBytes, Mode=OneWay, Converter={StaticResource ByteSize}}" />
+                                            </TextBlock>
+                                            <TextBlock Text="Stacked result available"
+                                                       Style="{StaticResource TelemetrySub}"
+                                                       Foreground="{DynamicResource AccentBrush}"
+                                                       Margin="0,2,0,0"
+                                                       Visibility="{Binding HasResult, Converter={StaticResource BoolToVisibility}}" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Button Content="Open folder"
+                                                    Command="{Binding DataContext.OpenRunFolderCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                    CommandParameter="{Binding}"
+                                                    Style="{StaticResource PanelButton}"
+                                                    MinHeight="30"
+                                                    Padding="10,4"
+                                                    Margin="0,0,7,0" />
+                                            <Button Content="Delete"
+                                                    Command="{Binding DataContext.DeleteRunCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                    CommandParameter="{Binding}"
+                                                    Style="{StaticResource PanelButton}"
+                                                    MinHeight="30"
+                                                    Padding="10,4"
+                                                    ToolTip="Delete this run's folder and everything in it. You will be asked to confirm." />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+
             <!-- PLAN — what is actually up tonight, and when.
                  The score says whether tonight is worth going out and Sky says
                  where to drive; this answers the question that comes before
