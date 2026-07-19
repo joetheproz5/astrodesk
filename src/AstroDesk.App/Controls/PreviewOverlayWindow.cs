@@ -24,12 +24,19 @@ namespace AstroDesk.App.Controls;
 /// </para>
 /// <para>
 /// The alternative was parking scrcpy off-screen and falling back to the
-/// captured-frame preview, which already renders guides correctly. That was
-/// rejected for two reasons: it depends on PrintWindow returning real pixels for
-/// a GPU-rendered SDL window, which is the classic case where PrintWindow
-/// returns black, and it would trade live video for a screen-scrape of it. It
-/// also gets nowhere near the thing that must never happen here - collapsing the
-/// host, which runs DestroyWindowCore and takes the scrcpy process down with it.
+/// captured-frame preview, which already renders guides correctly. It was
+/// rejected on the grounds that it would trade live video for a screen-scrape
+/// of it, and that collapsing or hiding the host is the one thing that must
+/// never happen here - it runs DestroyWindowCore and takes the scrcpy process
+/// down with it.
+/// </para>
+/// <para>
+/// It was also rejected on the grounds that PrintWindow returns black for
+/// GPU-rendered SDL windows. That part was wrong and is recorded here so it is
+/// not repeated: measured against scrcpy 3.3.4 on its direct3d renderer,
+/// PrintWindow with PW_RENDERFULLCONTENT returns the real frame - 95% non-black
+/// on a phone home screen. The captured-frame path is sound, which is what lets
+/// the focus loupe read pixels while this overlay draws over the video.
 /// </para>
 /// </remarks>
 public sealed class PreviewOverlayWindow : Window
