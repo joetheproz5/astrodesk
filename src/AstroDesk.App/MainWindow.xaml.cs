@@ -122,6 +122,13 @@ public partial class MainWindow : Window
         BindGuide(guides, PhonePreviewControl.OverlayThicknessProperty, nameof(MainWindowViewModel.OverlayThickness));
         BindGuide(guides, PhonePreviewControl.ShootingZoneProperty, nameof(MainWindowViewModel.ShootingZone));
 
+        // The loupe is the one overlay that needs pixels rather than lines. It is
+        // fed the captured frame, which is the only copy of the video WPF can
+        // read while scrcpy owns the window it is drawn over.
+        BindGuide(guides, PhonePreviewControl.FocusMagnifierProperty, nameof(MainWindowViewModel.FocusMagnifier));
+        BindGuide(guides, PhonePreviewControl.SourceProperty, nameof(MainWindowViewModel.PreviewImage));
+        BindGuide(guides, PhonePreviewControl.ZoomCenterProperty, nameof(MainWindowViewModel.ZoomCenter));
+
         _guideOverlay = new PreviewOverlayWindow { Content = guides };
         _guideOverlay.Attach(this);
         UpdateGuideOverlayTarget();

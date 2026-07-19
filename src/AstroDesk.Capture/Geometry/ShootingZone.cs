@@ -60,6 +60,41 @@ public readonly record struct ShootingZone(double Left, double Top, double Right
             rendered.Height * Height);
 
     /// <summary>
+    /// A crop for the focus loupe, centred on a point given relative to this
+    /// zone and never straying outside it.
+    /// </summary>
+    /// <param name="centreX">0 to 1 across the zone, not the whole frame.</param>
+    /// <param name="centreY">0 to 1 down the zone, not the whole frame.</param>
+    /// <param name="widthFraction">Crop width as a fraction of the zone.</param>
+    /// <param name="heightFraction">Crop height as a fraction of the zone.</param>
+    /// <returns>The crop in whole-frame coordinates, ready to use as a viewbox.</returns>
+    /// <remarks>
+    /// Taking the centre relative to the zone is what makes the untouched default
+    /// of dead centre land in the middle of the frame the camera is shooting,
+    /// rather than the middle of the phone's screen - which for Expert RAW is
+    /// somewhere in the control panel. Clamping to the zone stops the loupe
+    /// sliding onto the chrome when the centre is pushed to an edge.
+    /// </remarks>
+    public RectD CropAround(
+        double centreX,
+        double centreY,
+        double widthFraction,
+        double heightFraction)
+    {
+        double cropWidth = Math.Clamp(widthFraction, 0, 1) * Width;
+        double cropHeight = Math.Clamp(heightFraction, 0, 1) * Height;
+
+        double x = Left + (Math.Clamp(centreX, 0, 1) * Width) - (cropWidth / 2);
+        double y = Top + (Math.Clamp(centreY, 0, 1) * Height) - (cropHeight / 2);
+
+        return new RectD(
+            Math.Clamp(x, Left, Math.Max(Left, Right - cropWidth)),
+            Math.Clamp(y, Top, Math.Max(Top, Bottom - cropHeight)),
+            cropWidth,
+            cropHeight);
+    }
+
+    /// <summary>
     /// Clamps to the preview and guarantees a usable area, so a bad stored value
     /// cannot collapse the guides to nothing or push them off the frame.
     /// </summary>

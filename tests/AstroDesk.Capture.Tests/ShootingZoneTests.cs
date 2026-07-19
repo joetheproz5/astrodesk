@@ -115,4 +115,70 @@ public sealed class ShootingZoneTests
     [Fact]
     public void NormalisingAGoodZoneChangesNothing() =>
         Assert.Equal(ShootingZone.ExpertRaw43, ShootingZone.ExpertRaw43.Normalised());
+
+    // ------------------------------------------------------------- focus loupe
+
+    [Fact]
+    public void TheLoupeDefaultsToTheCentreOfTheFrameNotTheScreen()
+    {
+        // With the centre untouched at 0.5, 0.5 the loupe must land in the middle
+        // of what the camera is shooting. On the whole screen that point falls in
+        // Expert RAW's control panel, which is useless for checking focus.
+        ShootingZone zone = ShootingZone.ExpertRaw43;
+
+        RectD crop = zone.CropAround(0.5, 0.5, 0.12, 0.08);
+
+        double cropCentreX = crop.X + (crop.Width / 2);
+        double zoneCentreX = zone.Left + (zone.Width / 2);
+        Assert.Equal(zoneCentreX, cropCentreX, 4);
+        Assert.True(cropCentreX < 0.5, "the frame centre is left of the screen centre here");
+    }
+
+    [Fact]
+    public void TheLoupeCropStaysInsideTheZoneAtEveryEdge()
+    {
+        ShootingZone zone = ShootingZone.ExpertRaw43;
+
+        foreach ((double x, double y) in new[] { (0d, 0d), (1d, 0d), (0d, 1d), (1d, 1d), (0.5, 0d) })
+        {
+            RectD crop = zone.CropAround(x, y, 0.2, 0.2);
+
+            Assert.True(crop.X >= zone.Left - 1e-9, $"({x},{y}) crossed the left edge");
+            Assert.True(crop.Y >= zone.Top - 1e-9, $"({x},{y}) crossed the top edge");
+            Assert.True(crop.Right <= zone.Right + 1e-9, $"({x},{y}) crossed the right edge");
+            Assert.True(crop.Bottom <= zone.Bottom + 1e-9, $"({x},{y}) crossed the bottom edge");
+        }
+    }
+
+    [Fact]
+    public void TheLoupeCropIsSizedRelativeToTheZone()
+    {
+        // A crop expressed as a fraction of the whole screen would magnify less of
+        // the frame the narrower the viewfinder got.
+        RectD full = ShootingZone.FullScreen.CropAround(0.5, 0.5, 0.12, 0.12);
+        RectD narrow = ShootingZone.ExpertRaw43.CropAround(0.5, 0.5, 0.12, 0.12);
+
+        Assert.Equal(0.12, full.Width, 4);
+        Assert.Equal(0.12 * ShootingZone.ExpertRaw43.Width, narrow.Width, 4);
+        Assert.True(narrow.Width < full.Width);
+    }
+
+    [Fact]
+    public void ACropLargerThanTheZoneIsPinnedToIt()
+    {
+        RectD crop = ShootingZone.ExpertRaw43.CropAround(0.5, 0.5, 1, 1);
+
+        Assert.Equal(ShootingZone.ExpertRaw43.Left, crop.X, 4);
+        Assert.Equal(ShootingZone.ExpertRaw43.Width, crop.Width, 4);
+    }
+
+    [Fact]
+    public void AnOutOfRangeLoupeCentreIsClamped()
+    {
+        RectD low = ShootingZone.FullScreen.CropAround(-5, -5, 0.1, 0.1);
+        RectD high = ShootingZone.FullScreen.CropAround(5, 5, 0.1, 0.1);
+
+        Assert.Equal(0, low.X, 4);
+        Assert.Equal(0.9, high.X, 4);
+    }
 }

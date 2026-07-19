@@ -406,7 +406,19 @@ public sealed class PhonePreviewControl : FrameworkElement
         // so scrcpy's own letterboxing is negligible.
         if (GuidesOnly)
         {
-            DrawOverlays(drawingContext, new Rect(RenderSize));
+            Rect surface = new(RenderSize);
+            DrawOverlays(drawingContext, surface);
+
+            // The loupe needs pixels, and in this mode the picture on screen
+            // belongs to scrcpy's own window, which WPF cannot read. It is drawn
+            // from the captured frame instead - the same frames the histogram and
+            // screenshots already use - so it works here without the overlay
+            // having to render the video itself.
+            if (FocusMagnifier)
+            {
+                DrawFocusMagnifier(drawingContext, surface);
+            }
+
             return;
         }
 
@@ -585,22 +597,45 @@ public sealed class PhonePreviewControl : FrameworkElement
         }
     }
 
+    /// <summary>
+    /// Draws the magnified focus check, inside the shooting zone.
+    /// </summary>
+    /// <remarks>
+    /// Both the crop and the panel are kept within the zone. Magnifying the whole
+    /// mirrored screen would spend the loupe on the camera's control panel, and
+    /// parking the panel outside the zone would cover controls rather than the
+    /// dead space beside the frame.
+    /// </remarks>
     private void DrawFocusMagnifier(DrawingContext context, Rect renderedRect)
     {
-        double width = Math.Min(220, renderedRect.Width * 0.35);
+        Rect zone = ApplyShootingZone(renderedRect);
+        double width = Math.Min(220, zone.Width * 0.35);
         double height = width * 0.65;
         Rect magnifier = new(
-            renderedRect.Right - width - 12,
-            renderedRect.Top + 12,
+            zone.Right - width - 12,
+            zone.Top + 12,
             width,
             height);
-        double cropWidth = 0.12;
-        double cropHeight = cropWidth * (height / width);
-        Rect crop = new(
-            Math.Clamp(ZoomCenter.X - (cropWidth / 2), 0, 1 - cropWidth),
-            Math.Clamp(ZoomCenter.Y - (cropHeight / 2), 0, 1 - cropHeight),
-            cropWidth,
-            cropHeight);
+
+        if (Source is null)
+        {
+            // Says why rather than showing an empty box. In overlay mode the
+            // picture belongs to scrcpy, so a silent black rectangle would look
+            // like a broken loupe rather than a missing capture.
+            DrawLoupeUnavailable(context, magnifier);
+            return;
+        }
+
+        // ZoomCenter is taken as a position within the shooting zone, so its
+        // default of dead centre lands in the middle of the frame the camera is
+        // actually shooting rather than the middle of the phone's screen.
+        RectD cropped = ShootingZone.Normalised().CropAround(
+            ZoomCenter.X,
+            ZoomCenter.Y,
+            0.12,
+            0.12 * (height / width));
+        Rect crop = new(cropped.X, cropped.Y, cropped.Width, cropped.Height);
+
         ImageBrush brush = new(Source)
         {
             Stretch = Stretch.Fill,
@@ -610,6 +645,26 @@ public sealed class PhonePreviewControl : FrameworkElement
         context.DrawRectangle(FindBrush("PanelBackgroundBrush", Brushes.Black), null, magnifier);
         context.DrawRectangle(brush, new Pen(FindBrush("AccentBrush", Brushes.OrangeRed), 2), magnifier);
         DrawBadge(context, "FOCUS", magnifier.Left + 7, magnifier.Top + 7);
+    }
+
+    private void DrawLoupeUnavailable(DrawingContext context, Rect magnifier)
+    {
+        context.DrawRectangle(
+            new SolidColorBrush(Color.FromArgb(210, 12, 15, 18)),
+            new Pen(FindBrush("PanelBorderBrush", Brushes.DimGray), 1),
+            magnifier);
+
+        FormattedText text = CreateText(
+            "Loupe needs the captured frame",
+            11,
+            FindBrush("SecondaryTextBrush", Brushes.Gray));
+        text.MaxTextWidth = Math.Max(1, magnifier.Width - 16);
+        text.TextAlignment = TextAlignment.Center;
+        context.DrawText(
+            text,
+            new Point(
+                magnifier.Left + 8,
+                magnifier.Top + Math.Max(6, (magnifier.Height - text.Height) / 2)));
     }
 
     private void DrawError(DrawingContext context, Rect bounds, string message)
