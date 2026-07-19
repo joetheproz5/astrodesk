@@ -81,6 +81,38 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
     /// </summary>
     private const int MaximumCaptureRecoveries = 3;
 
+    /// <summary>
+    /// How many times the preview restarts itself before giving up.
+    /// </summary>
+    private const int MaximumRestartAttempts = 5;
+
+    /// <summary>
+    /// A session that lasted this long is treated as healthy, which refunds the
+    /// restart budget.
+    /// </summary>
+    /// <remarks>
+    /// Without this an all-night run that drops once an hour would exhaust five
+    /// attempts by midnight and then stay dead until someone noticed. A drop
+    /// after a long good run is a fresh incident, not a failing retry.
+    /// </remarks>
+    private static readonly TimeSpan HealthyRunDuration = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Grows so a phone that is unplugged, or busy rebooting, is not hammered.
+    /// </summary>
+    private static readonly TimeSpan[] RestartBackoff =
+    [
+        TimeSpan.FromSeconds(2),
+        TimeSpan.FromSeconds(5),
+        TimeSpan.FromSeconds(10),
+        TimeSpan.FromSeconds(20),
+        TimeSpan.FromSeconds(30),
+    ];
+
+    private int _restartAttempts;
+    private int _restarting;
+    private volatile bool _stopRequested;
+
     private int _captureRecoveries;
     private readonly ILogger<PhonePreviewCoordinator> _logger;
     private readonly object _latestSync = new();
@@ -164,9 +196,30 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
 
     public ScrcpySession? CurrentSession => _scrcpy.CurrentSession;
 
+    /// <summary>
+    /// Starts the preview at the user's request, which clears the restart budget.
+    /// </summary>
     public async Task<ScrcpySession> StartAsync(
         ScrcpyLaunchOptions options,
         CancellationToken cancellationToken = default)
+    {
+        _stopRequested = false;
+        Interlocked.Exchange(ref _restartAttempts, 0);
+        return await StartCoreAsync(options, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Starts the preview without touching the restart budget.
+    /// </summary>
+    /// <remarks>
+    /// The automatic restart calls this rather than <see cref="StartAsync"/>.
+    /// Going through the public entry point would refund the budget on every
+    /// failed attempt, so a phone that never comes back would be retried forever
+    /// instead of five times.
+    /// </remarks>
+    private async Task<ScrcpySession> StartCoreAsync(
+        ScrcpyLaunchOptions options,
+        CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(options.DeviceSerial))
         {
@@ -202,6 +255,11 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
+        // Set before anything is torn down: stopping scrcpy raises the same
+        // crashed event a real fault does, and restarting a preview the user has
+        // just deliberately stopped would be maddening.
+        _stopRequested = true;
+
         try
         {
             await _photoSync.StopAsync(cancellationToken).ConfigureAwait(false);
@@ -428,11 +486,117 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
     private void HandleHistogramReady(object? sender, HistogramResult result) =>
         HistogramReady?.Invoke(this, result);
 
+    /// <summary>
+    /// Brings the preview back after scrcpy dies under it.
+    /// </summary>
+    /// <remarks>
+    /// The preview used to simply report the death and stay dead, which during a
+    /// night session means the frames stop and nobody finds out until they next
+    /// look at the screen. A USB link that resets, or a phone that drops its
+    /// connection for a moment, should cost a couple of seconds rather than the
+    /// rest of the run.
+    /// </remarks>
     private async void HandleScrcpyCrashed(object? sender, ScrcpyCrashedEventArgs args)
     {
-        await _photoSync.StopAsync().ConfigureAwait(false);
-        await _orientation.RestoreAsync().ConfigureAwait(false);
-        PublishStatus(false, "scrcpy stopped unexpectedly.", $"scrcpy exited with code {args.ExitCode}.");
+        try
+        {
+            await _photoSync.StopAsync().ConfigureAwait(false);
+
+            if (_stopRequested)
+            {
+                await _orientation.RestoreAsync().ConfigureAwait(false);
+                return;
+            }
+
+            // A session that ran a good while before dying is a fresh incident
+            // rather than a failing retry, so it gets the budget back.
+            if (DateTimeOffset.UtcNow - args.Session.StartedAt >= HealthyRunDuration)
+            {
+                Interlocked.Exchange(ref _restartAttempts, 0);
+            }
+
+            // Only one restart loop at a time; a crash can surface through more
+            // than one path at once.
+            if (Interlocked.Exchange(ref _restarting, 1) == 1)
+            {
+                return;
+            }
+
+            try
+            {
+                await RestartAfterCrashAsync(args).ConfigureAwait(false);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _restarting, 0);
+            }
+        }
+        catch (Exception exception)
+        {
+            // This is an async void event handler: an escaping exception would
+            // take the process down rather than the preview.
+            _logger.LogError(exception, "Recovering the preview after a scrcpy crash failed.");
+            PublishStatus(false, "Phone preview stopped.", exception.Message);
+        }
+    }
+
+    private async Task RestartAfterCrashAsync(ScrcpyCrashedEventArgs args)
+    {
+        PublishStatus(
+            false,
+            "Phone preview lost; reconnecting.",
+            $"scrcpy exited with code {args.ExitCode}.");
+
+        while (!_stopRequested && _restartAttempts < MaximumRestartAttempts)
+        {
+            TimeSpan wait = RestartBackoff[Math.Min(_restartAttempts, RestartBackoff.Length - 1)];
+            int attempt = Interlocked.Increment(ref _restartAttempts);
+
+            PublishStatus(
+                false,
+                $"Phone preview lost; reconnecting in {wait.TotalSeconds:0}s " +
+                $"(attempt {attempt} of {MaximumRestartAttempts}).");
+
+            await Task.Delay(wait).ConfigureAwait(false);
+            if (_stopRequested)
+            {
+                return;
+            }
+
+            try
+            {
+                // Restarted from the dead session's own options rather than
+                // through ReconnectAsync, which reads the current session - and
+                // after a crash there may not be one to read.
+                ScrcpySession session = await StartCoreAsync(
+                    args.Session.Options,
+                    CancellationToken.None).ConfigureAwait(false);
+
+                // The window is a new one, so the host has to be pointed at it or
+                // the preview stays blank while scrcpy runs happily behind it.
+                WindowHandleChanged?.Invoke(this, session.WindowHandle);
+                _logger.LogInformation("Phone preview reconnected after {Attempts} attempt(s).", attempt);
+                PublishStatus(true, "Phone preview reconnected.");
+                return;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(
+                    exception,
+                    "Preview restart attempt {Attempt} of {Maximum} failed.",
+                    attempt,
+                    MaximumRestartAttempts);
+            }
+        }
+
+        if (!_stopRequested)
+        {
+            await _orientation.RestoreAsync().ConfigureAwait(false);
+            PublishStatus(
+                false,
+                "Phone preview stopped after repeated reconnection failures.",
+                "Check the cable and connection, then press Start preview.");
+        }
     }
 
     private void HandleScrcpyStateChanged(object? sender, ScrcpyStateChangedEventArgs args)
