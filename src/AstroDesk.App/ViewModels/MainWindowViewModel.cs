@@ -76,6 +76,12 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private bool _suppressLocationRefresh;
     private long _conditionsRequestVersion;
     private PreviewFrameSnapshot? _pendingPreviewFrame;
+
+    /// <summary>
+    /// How the phone was attached when it last worked, so a drop can be
+    /// explained after the serial that would have told us is already gone.
+    /// </summary>
+    private DeviceTransport _lastKnownTransport = DeviceTransport.Unknown;
     private int _previewDispatchScheduled;
     private CancellationTokenSource? _wirelessQrCancellation;
     private int _disposed;
@@ -931,14 +937,23 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
             if (monitor?.Connection.IsConnected != true)
             {
-                ShowWirelessPanel = true;
-                WirelessStatus = "The phone is paired but not connected yet. On the phone's main Wireless debugging screen, copy its IP address and port into Connect directly, then press Connect.";
-                StatusMessage = "No authorized ADB device is connected. Finish the wireless connection first.";
+                // The cached snapshot can be a poll behind. That is how this
+                // managed to report no device while the status bar still showed
+                // the phone connected, which reads as the app contradicting
+                // itself. Ask once more before refusing.
+                await _deviceMonitor.PollOnceAsync(_lifetimeCancellation.Token).ConfigureAwait(true);
+                monitor = _deviceMonitor.LastSnapshot;
+            }
+
+            if (monitor?.Connection.IsConnected != true)
+            {
+                ReportNoDeviceForPreview();
                 return;
             }
 
             string? serial = monitor?.Connection.SelectedDevice?.Serial
                              ?? SelectedAdbDevice?.Serial;
+            _lastKnownTransport = DeviceTransportDetector.Detect(serial);
             ScrcpySession session = await _preview.StartAsync(
                 BuildLaunchOptions(serial),
                 _lifetimeCancellation.Token).ConfigureAwait(true);
@@ -951,6 +966,55 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             PreviewError = FriendlyToolError(exception, "scrcpy");
             PreviewStatus = "Embedded preview unavailable";
             StatusMessage = PreviewError;
+        }
+    }
+
+    /// <summary>
+    /// Explains a missing device in terms of how it was actually attached.
+    /// </summary>
+    /// <remarks>
+    /// This used to open the wireless panel and say "finish the wireless
+    /// connection first" whatever the phone was plugged into. On a cable that is
+    /// simply wrong, and it is worst exactly when it is least welcome: a USB link
+    /// that resets mid-session sends the user to a pairing screen that cannot
+    /// help, while the status bar still shows the phone as connected.
+    /// </remarks>
+    private void ReportNoDeviceForPreview()
+    {
+        string? serial = _deviceMonitor.LastSnapshot?.Connection.SelectedDevice?.Serial
+                         ?? SelectedAdbDevice?.Serial;
+
+        // A dropped device leaves no serial to read, so fall back to how it was
+        // attached when it was last working.
+        DeviceTransport transport = DeviceTransportDetector.Detect(serial);
+        if (transport == DeviceTransport.Unknown)
+        {
+            transport = _lastKnownTransport;
+        }
+
+        switch (transport)
+        {
+            case DeviceTransport.Cable:
+                StatusMessage =
+                    "The phone stopped responding over USB. Check the cable and port, " +
+                    "then press Start preview again.";
+                return;
+
+            case DeviceTransport.Wireless:
+                ShowWirelessPanel = true;
+                WirelessStatus =
+                    "The wireless connection has dropped. On the phone's Wireless debugging " +
+                    "screen, copy its IP address and port into Connect directly, then press Connect.";
+                StatusMessage = "The wireless ADB connection has dropped. Reconnect it, then start the preview.";
+                return;
+
+            default:
+                // Nothing has ever connected in this session, so neither route is
+                // more likely than the other; offering both beats guessing.
+                StatusMessage =
+                    "No phone is connected. Plug it in with a USB cable, " +
+                    "or use Wireless to pair over Wi-Fi.";
+                return;
         }
     }
 
