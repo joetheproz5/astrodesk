@@ -46,11 +46,9 @@ public sealed class CapturePreviewConverter : IValueConverter
 
         try
         {
-            return Services.LivePreviewRenderer.LoadDownscaled(path, 160);
+            return AstroDesk.Stacking.PreviewDecoder.LoadDownscaled(path, 160);
         }
-        catch (Exception exception) when (
-            exception is NotSupportedException or FileFormatException or IOException
-                or ArgumentException or OverflowException or InvalidOperationException)
+        catch (Exception exception) when (AstroDesk.Stacking.PreviewDecoder.IsUnreadable(exception))
         {
             return null;
         }

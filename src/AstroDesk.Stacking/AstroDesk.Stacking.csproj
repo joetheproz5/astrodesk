@@ -5,7 +5,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <WarningsAsErrors>nullable</WarningsAsErrors>
+    <!-- Decoding captures needs the WPF imaging stack. It lives here rather than
+         in the app so the pipeline tests can exercise the real decoder instead
+         of keeping their own copy of it. -->
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- UseWPF swaps the implicit using set and drops System.IO. -->
+    <Using Include="System.IO" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\AstroDesk.Core\AstroDesk.Core.csproj" />

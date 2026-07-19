@@ -45,7 +45,10 @@ public sealed class LivePreviewPipelineTests : IDisposable
     {
         string[] paths = WriteSequence();
         PreviewImage first = Decode(paths[0]);
-        var stacker = new LivePreviewStacker(first.Width, first.Height);
+
+        // Shaped from the frame rather than assumed. Assuming greyscale here is
+        // what let this test keep passing after the pipeline moved to colour.
+        var stacker = new LivePreviewStacker(first.Width, first.Height, first.Channels);
 
         foreach (string path in paths)
         {
@@ -95,33 +98,18 @@ public sealed class LivePreviewPipelineTests : IDisposable
     /// <summary>
     /// Mirrors the decode in LivePreviewRenderer: small, greyscale, float.
     /// </summary>
-    private static PreviewImage Decode(string path, int targetWidth = Width)
-    {
-        var bitmap = new BitmapImage();
-        bitmap.BeginInit();
-        bitmap.DecodePixelWidth = targetWidth;
-        bitmap.CacheOption = BitmapCacheOption.OnLoad;
-        bitmap.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
-        bitmap.UriSource = new Uri(path);
-        bitmap.EndInit();
-        bitmap.Freeze();
-
-        var grey = new FormatConvertedBitmap(bitmap, PixelFormats.Gray8, null, 0);
-        grey.Freeze();
-
-        int width = grey.PixelWidth;
-        int height = grey.PixelHeight;
-        byte[] bytes = new byte[width * height];
-        grey.CopyPixels(bytes, width, 0);
-
-        float[] pixels = new float[bytes.Length];
-        for (int index = 0; index < bytes.Length; index++)
-        {
-            pixels[index] = bytes[index];
-        }
-
-        return new PreviewImage(width, height, pixels);
-    }
+    /// <summary>
+    /// The decoder the app actually uses.
+    /// </summary>
+    /// <remarks>
+    /// This test used to carry its own copy of the decode, which meant a
+    /// regression in the real one passed green - including through the move from
+    /// greyscale to colour, when the copy stayed stubbornly grey and agreed with
+    /// nothing that shipped.
+    /// </remarks>
+    private static PreviewImage Decode(string path, int targetWidth = Width) =>
+        PreviewDecoder.Decode(path, targetWidth)
+        ?? throw new InvalidOperationException($"The decoder could not read '{path}'.");
 
     private string[] WriteSequence()
     {
