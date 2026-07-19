@@ -1,4 +1,4 @@
-using AstroDesk.Device.Adb;
+﻿using AstroDesk.Device.Adb;
 using AstroDesk.Device.Processes;
 using AstroDesk.Stacking;
 using Xunit;
@@ -105,7 +105,8 @@ public sealed class ScreenWakeGuardTests
         public Task<ProcessExecutionResult> ExecuteAsync(
             string? serial,
             IReadOnlyList<string> arguments,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            TimeSpan? timeout = null)
         {
             Commands.Add(string.Join(' ', arguments));
             return Task.FromResult(new ProcessExecutionResult(0, readValue, string.Empty, TimeSpan.Zero));
@@ -117,7 +118,8 @@ public sealed class ScreenWakeGuardTests
         public Task<ProcessExecutionResult> ExecuteAsync(
             string? serial,
             IReadOnlyList<string> arguments,
-            CancellationToken cancellationToken = default) =>
+            CancellationToken cancellationToken = default,
+            TimeSpan? timeout = null) =>
             throw new InvalidOperationException("device offline");
     }
 

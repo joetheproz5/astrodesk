@@ -218,10 +218,15 @@ public sealed class PhonePhotoSyncService(
         string temporaryPath = localPath + $".partial-{Guid.NewGuid():N}";
         try
         {
+            // A raw frame is around 28 MB and the link may be wireless, so this
+            // gets far longer than a query would. The general timeout exists to
+            // stop a dead device wedging the UI; applying it to a legitimate
+            // transfer would just break importing on a slow connection.
             ProcessExecutionResult result = await _adb.ExecuteAsync(
                     serial,
                     ["pull", remotePath, temporaryPath],
-                    cancellationToken)
+                    cancellationToken,
+                    TimeSpan.FromMinutes(5))
                 .ConfigureAwait(false);
             if (!result.Succeeded || !File.Exists(temporaryPath))
             {

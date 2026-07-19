@@ -9,10 +9,23 @@ namespace AstroDesk.Device.Adb;
 
 public interface IAdbCommandExecutor
 {
+    /// <summary>
+    /// Runs an adb command against a device.
+    /// </summary>
+    /// <param name="serial">Device to target, or null for the only one attached.</param>
+    /// <param name="arguments">Arguments following the device selector.</param>
+    /// <param name="cancellationToken">Cancels the command.</param>
+    /// <param name="timeout">
+    /// How long to allow before the command is given up on. Defaults to the
+    /// process runner's own limit, which suits a query but not a file transfer:
+    /// pulling a 28 MB raw frame over a slow link legitimately takes longer, and
+    /// timing that out would break photo import rather than protect anything.
+    /// </param>
     Task<ProcessExecutionResult> ExecuteAsync(
         string? serial,
         IReadOnlyList<string> arguments,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        TimeSpan? timeout = null);
 }
 
 public interface IAdbDeviceClient
@@ -83,7 +96,8 @@ public sealed class AdbService : IAdbCommandExecutor, IAdbDeviceClient, IAdbWire
     public async Task<ProcessExecutionResult> ExecuteAsync(
         string? serial,
         IReadOnlyList<string> arguments,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        TimeSpan? timeout = null)
     {
         ArgumentNullException.ThrowIfNull(arguments);
         var adbPath = _executableLocator.Resolve(
@@ -106,7 +120,8 @@ public sealed class AdbService : IAdbCommandExecutor, IAdbDeviceClient, IAdbWire
                 adbPath,
                 finalArguments,
                 SensitiveValues: sensitiveValues,
-                CreateNoWindow: true),
+                CreateNoWindow: true,
+                Timeout: timeout),
             cancellationToken).ConfigureAwait(false);
     }
 

@@ -1,4 +1,4 @@
-using AstroDesk.Device.Adb;
+﻿using AstroDesk.Device.Adb;
 using AstroDesk.Device.Processes;
 
 namespace AstroDesk.Device.Tests;
@@ -57,7 +57,8 @@ public sealed class AdbInputServiceTests
         public Task<ProcessExecutionResult> ExecuteAsync(
             string? serial,
             IReadOnlyList<string> arguments,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            TimeSpan? timeout = null)
         {
             Commands.Add((serial, arguments));
             return Task.FromResult(new ProcessExecutionResult(0, string.Empty, string.Empty, TimeSpan.Zero));

@@ -17,12 +17,31 @@ public sealed class ProcessRunner : IProcessRunner
         _logger = logger ?? NullLogger<ProcessRunner>.Instance;
     }
 
+    /// <summary>
+    /// How long a one-shot tool may run before it is killed.
+    /// </summary>
+    /// <remarks>
+    /// Every adb call used to wait on the app's lifetime token alone, so a
+    /// device that stopped answering - an unreachable wireless phone above all -
+    /// blocked forever. That wedged the UI rather than the tool: the command
+    /// driving it stays disabled while its task runs, and scrcpy's lifecycle
+    /// semaphore meant the stuck call also blocked stop and reconnect, leaving
+    /// all three buttons greyed out with no way back except restarting the app.
+    /// Generous enough for a slow pull over USB, short enough to fail visibly.
+    /// </remarks>
+    public static TimeSpan DefaultTimeout { get; } = TimeSpan.FromSeconds(30);
+
     public async Task<ProcessExecutionResult> RunAsync(
         ProcessInvocation invocation,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(invocation);
         cancellationToken.ThrowIfCancellationRequested();
+
+        TimeSpan timeout = invocation.Timeout ?? DefaultTimeout;
+        using CancellationTokenSource timeoutSource = new(timeout);
+        using CancellationTokenSource linked =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token);
 
         using var process = CreateProcess(invocation);
         var stopwatch = Stopwatch.StartNew();
@@ -47,7 +66,7 @@ public sealed class ProcessRunner : IProcessRunner
 
         try
         {
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            await process.WaitForExitAsync(linked.Token).ConfigureAwait(false);
             await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -55,6 +74,19 @@ public sealed class ProcessRunner : IProcessRunner
             TryKill(process);
             await WaitAfterKillAsync(process).ConfigureAwait(false);
             await AwaitPumpsQuietlyAsync(stdoutTask, stderrTask).ConfigureAwait(false);
+
+            // Only the timeout fired, so this is the tool wedging rather than
+            // the user or the app shutting down. Saying so lets the caller show
+            // something better than a bare cancellation.
+            if (timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogWarning(
+                    "External tool {ToolName} exceeded {Timeout} and was stopped.",
+                    Path.GetFileName(invocation.FileName),
+                    timeout);
+                throw new ToolProcessTimeoutException(invocation.FileName, timeout);
+            }
+
             throw;
         }
         finally

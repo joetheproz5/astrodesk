@@ -3498,9 +3498,22 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                         : character.ToString()));
 
     private static string FriendlyToolError(Exception exception, string toolName) =>
-        exception is AstroDesk.Device.Processes.ExecutableNotFoundException
-            ? $"{toolName} was not found. Install it or select its executable in Settings."
-            : exception.Message;
+        exception switch
+        {
+            AstroDesk.Device.Processes.ExecutableNotFoundException =>
+                $"{toolName} was not found. Install it or select its executable in Settings.",
+
+            // The common cause is a device that is listed but no longer
+            // answering, usually a wireless one that has gone off the network.
+            // Naming that is more use than the raw timeout, because the fix is
+            // to pick a different device rather than to try again.
+            AstroDesk.Device.Processes.ToolProcessTimeoutException timeout =>
+                $"The phone stopped responding, so {toolName} was given up on after " +
+                $"{timeout.Timeout.TotalSeconds:0} seconds. Check the device is still " +
+                "reachable, pick another under DEVICE, then try again.",
+
+            _ => exception.Message,
+        };
 
     private static string FriendlyConnectionStatus(DeviceMonitorSnapshot snapshot)
     {

@@ -1,4 +1,4 @@
-using AstroDesk.Device.Adb;
+﻿using AstroDesk.Device.Adb;
 using AstroDesk.Stacking;
 using Xunit;
 
@@ -101,7 +101,8 @@ public sealed class CaptureFlushPromptTests
         public Task<AstroDesk.Device.Processes.ProcessExecutionResult> ExecuteAsync(
             string? serial,
             IReadOnlyList<string> arguments,
-            CancellationToken cancellationToken = default) =>
+            CancellationToken cancellationToken = default,
+            TimeSpan? timeout = null) =>
             Task.FromResult(new AstroDesk.Device.Processes.ProcessExecutionResult(
                 0, output, string.Empty, TimeSpan.Zero));
     }
@@ -111,7 +112,8 @@ public sealed class CaptureFlushPromptTests
         public Task<AstroDesk.Device.Processes.ProcessExecutionResult> ExecuteAsync(
             string? serial,
             IReadOnlyList<string> arguments,
-            CancellationToken cancellationToken = default) =>
+            CancellationToken cancellationToken = default,
+            TimeSpan? timeout = null) =>
             throw new InvalidOperationException("device offline");
     }
 
