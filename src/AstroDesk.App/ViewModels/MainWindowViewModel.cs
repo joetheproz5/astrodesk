@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -775,6 +775,83 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public bool IsSky => CurrentPage == "Sky";
 
+    public bool IsPlan => CurrentPage == "Plan";
+
+    // ------------------------------------------------------------------- plan
+
+    /// <summary>
+    /// What is worth pointing at tonight, best first.
+    /// </summary>
+    public ObservableCollection<TargetPlanRow> TargetPlans { get; } = [];
+
+    [ObservableProperty]
+    private string _targetPlanSummary = "Waiting for tonight's twilight times.";
+
+    /// <summary>
+    /// Recomputes tonight's targets for the current site and dark window.
+    /// </summary>
+    /// <remarks>
+    /// Driven off the astronomy snapshot rather than a timer: the answer only
+    /// changes when the date, the site, or the twilight times change, and those
+    /// all arrive together.
+    /// </remarks>
+    private void RefreshTargetPlans()
+    {
+        TargetPlans.Clear();
+
+        DateTimeOffset? darkStart = _latestAstronomy?.DarkSkyWindowStart ?? _latestAstronomy?.Sunset;
+        DateTimeOffset? darkEnd = _latestAstronomy?.DarkSkyWindowEnd ?? _latestAstronomy?.Sunrise;
+
+        if (darkStart is null || darkEnd is null)
+        {
+            TargetPlanSummary = "Waiting for tonight's twilight times.";
+            return;
+        }
+
+        // A window that ends before it starts has run past midnight.
+        if (darkEnd <= darkStart)
+        {
+            darkEnd = darkEnd.Value.AddDays(1);
+        }
+
+        IReadOnlyList<TargetPlan> plans = TargetPlanner.PlanNight(
+            CelestialTargets.Reachable,
+            Latitude,
+            Longitude,
+            darkStart.Value,
+            darkEnd.Value);
+
+        foreach (TargetPlan plan in plans)
+        {
+            TargetPlans.Add(new TargetPlanRow(plan, FormatLocationTime));
+        }
+
+        int usable = plans.Count(plan => plan.IsUsable);
+        TargetPlanSummary = usable == 0
+            ? $"Nothing on the list clears {TargetPlanner.MinimumUsableAltitudeDegrees:0}° tonight."
+            : $"{usable} of {plans.Count} targets clear {TargetPlanner.MinimumUsableAltitudeDegrees:0}° " +
+              $"during tonight's dark window.";
+    }
+
+    /// <summary>
+    /// Points the session at a planned target.
+    /// </summary>
+    [RelayCommand]
+    private void UseTarget(TargetPlanRow? row)
+    {
+        if (row is null)
+        {
+            return;
+        }
+
+        TargetName = row.Name;
+        SelectedSessionType = row.SessionType;
+        CurrentPage = "Dashboard";
+        StatusMessage = row.IsUsable
+            ? $"Session set to {row.Name}. Best around {row.PeakText}."
+            : $"Session set to {row.Name}, which does not rise high enough tonight.";
+    }
+
     /// <summary>
     /// The light-pollution map, opened on the site currently being planned.
     /// </summary>
@@ -945,6 +1022,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     [RelayCommand]
     private void ShowSky() => CurrentPage = "Sky";
+
+    [RelayCommand]
+    private void ShowPlan() => CurrentPage = "Plan";
 
     /// <summary>
     /// Re-centres the map on the site currently being planned.
@@ -2437,6 +2517,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(IsSettings));
         OnPropertyChanged(nameof(IsStacking));
         OnPropertyChanged(nameof(IsSky));
+        OnPropertyChanged(nameof(IsPlan));
     }
 
     partial void OnShowNightBriefDrawerChanged(bool value)
@@ -3012,6 +3093,10 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private void UpdateConditionsDisplay()
     {
+        // Tonight's targets depend on the same twilight times and site as
+        // everything else here, so they are rebuilt on the same signal.
+        RefreshTargetPlans();
+
         WeatherConditions? weather = _latestWeather;
         TemperatureText = Format(weather?.TemperatureCelsius, "0.0", " °C");
         HumidityText = Format(weather?.HumidityPercent, "0", "%");

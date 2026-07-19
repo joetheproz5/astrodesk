@@ -106,6 +106,20 @@
                             </Style>
                         </Button.Style>
                     </Button>
+                    <Button Content="Plan"
+                            Command="{Binding ShowPlanCommand}"
+                            Margin="0,0,4,0">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource TouchNavButton}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsPlan}" Value="True">
+                                        <Setter Property="Background" Value="{DynamicResource PanelRaisedBrush}" />
+                                        <Setter Property="BorderBrush" Value="{DynamicResource PanelBorderBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
                     <Button Content="Sky"
                             Command="{Binding ShowSkyCommand}"
                             Margin="0,0,4,0">
@@ -1596,6 +1610,115 @@
                  over a session. Averaging them unregistered yields trails, not a
                  cleaner image, which is why the heavy lifting is handed to Siril
                  for star-based registration before integration. -->
+            <!-- PLAN — what is actually up tonight, and when.
+                 The score says whether tonight is worth going out and Sky says
+                 where to drive; this answers the question that comes before
+                 both. Altitudes come from the same ephemeris library the
+                 twilight times do, so the two can never disagree. -->
+            <Grid Visibility="{Binding IsPlan, Converter={StaticResource BoolToVisibility}}"
+                  Margin="18,16,18,16">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="12" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0">
+                    <TextBlock Text="TONIGHT'S TARGETS" Style="{StaticResource RailHeader}" Margin="0" />
+                    <TextBlock Text="{Binding TargetPlanSummary}"
+                               Style="{StaticResource TelemetrySub}"
+                               Margin="0,3,0,0" />
+                </StackPanel>
+
+                <ScrollViewer Grid.Row="2"
+                              HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto"
+                              PanningMode="VerticalFirst"
+                              PanningDeceleration="0.0015"
+                              PanningRatio="1">
+                    <ItemsControl ItemsSource="{Binding TargetPlans}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource PanelCard}"
+                                        Padding="14,11"
+                                        Margin="0,0,0,9">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+
+                                        <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal">
+                                            <TextBlock Text="{Binding Name}"
+                                                       FontSize="15"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource PrimaryTextBrush}"
+                                                       VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding Verdict}"
+                                                       Margin="10,0,0,0"
+                                                       VerticalAlignment="Center">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock" BasedOn="{StaticResource TelemetrySub}">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsUsable}" Value="False">
+                                                                <Setter Property="Foreground" Value="{DynamicResource SecondaryTextBrush}" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding IsMoonProblem}" Value="True">
+                                                                <Setter Property="Foreground" Value="{DynamicResource WarningBrush}" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </StackPanel>
+
+                                        <TextBlock Grid.Row="1" Grid.Column="0"
+                                                   Text="{Binding Notes}"
+                                                   Style="{StaticResource TelemetrySub}"
+                                                   TextWrapping="Wrap"
+                                                   Margin="0,4,14,0" />
+
+                                        <WrapPanel Grid.Row="2" Grid.Column="0" Margin="0,8,0,0">
+                                            <StackPanel Width="182">
+                                                <TextBlock Text="WINDOW" Style="{StaticResource TelemetryLabel}" />
+                                                <TextBlock Text="{Binding WindowText}" Style="{StaticResource TelemetrySub}" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                            <StackPanel Width="168">
+                                                <TextBlock Text="HIGHEST" Style="{StaticResource TelemetryLabel}" />
+                                                <TextBlock Text="{Binding PeakText}" Style="{StaticResource TelemetrySub}" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                            <StackPanel Width="188">
+                                                <TextBlock Text="ABOVE HORIZON" Style="{StaticResource TelemetryLabel}" />
+                                                <TextBlock Text="{Binding DurationText}" Style="{StaticResource TelemetrySub}" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                            <StackPanel Width="212">
+                                                <TextBlock Text="MOON" Style="{StaticResource TelemetryLabel}" />
+                                                <TextBlock Text="{Binding MoonText}" Style="{StaticResource TelemetrySub}" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                        </WrapPanel>
+
+                                        <Button Grid.Row="0" Grid.Column="1" Grid.RowSpan="3"
+                                                Content="Shoot this"
+                                                Command="{Binding DataContext.UseTargetCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                CommandParameter="{Binding}"
+                                                Style="{StaticResource PanelButton}"
+                                                MinHeight="32"
+                                                Padding="12,5"
+                                                VerticalAlignment="Center"
+                                                ToolTip="Set the session target and type to this, and go back to Shoot." />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+
             <!-- SKY — light pollution map for choosing where to drive.
                  The live web map rather than something drawn from the atlas
                  tiles the app already caches: picking a site is planning done at
