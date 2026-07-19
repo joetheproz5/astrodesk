@@ -41,9 +41,19 @@ public sealed class DarkCalibrationScriptTests
         string script = Script("C:\\run\\darks");
 
         Assert.Contains("cd darks", script, StringComparison.Ordinal);
-        Assert.Contains("convert dark -out=.", script, StringComparison.Ordinal);
+        Assert.Contains("convert dark -out=../darkprocess", script, StringComparison.Ordinal);
         Assert.Contains("stack dark_ rej 3 3 -nonorm -out=master_dark", script, StringComparison.Ordinal);
-        Assert.Contains("cd ..", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheMasterDarkIsBuiltBeforeTheLightsAreConverted()
+    {
+        // While the run folder still holds nothing but the original captures.
+        string script = Script("C:\\run\\darks");
+
+        Assert.True(
+            script.IndexOf("cd darks", StringComparison.Ordinal) <
+            script.IndexOf("convert astrodesk", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -97,7 +107,10 @@ public sealed class DarkCalibrationScriptTests
     {
         string script = Script(darks: null, extension: "dng");
 
-        Assert.Contains("convert astrodesk -out=. -debayer", script, StringComparison.Ordinal);
+        Assert.Contains(
+            $"convert astrodesk -out={SirilScriptBuilder.ProcessFolderName} -debayer",
+            script,
+            StringComparison.Ordinal);
     }
 
     [Fact]

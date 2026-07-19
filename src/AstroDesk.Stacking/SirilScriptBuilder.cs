@@ -66,30 +66,43 @@ public static class SirilScriptBuilder
         bool raw = IsRawExtension(extension);
         bool calibrating = HasDarks(request);
 
-        // Convert whatever the phone produced into a Siril sequence.
+        // The darks are handled first, while the working directory still holds
+        // nothing but the original captures.
+        if (calibrating)
+        {
+            AppendMasterDark(script);
+            script.AppendLine();
+        }
+
+        // Convert into a working subfolder rather than alongside the captures.
         //
-        // -debayer interpolates the Bayer mosaic to colour, and it belongs at
+        // Siril's convert takes every convertible file in the current directory,
+        // and FITS is convertible, so converting in place means a second run
+        // converts the first run's output as well: ten frames silently became
+        // twenty, each counted again. Keeping the products in their own folder
+        // makes a re-run idempotent.
+        //
+        // -debayer interpolates the Bayer mosaic to colour, and belongs at
         // convert time only when nothing else will do it. With darks it has to
-        // wait: a dark must be subtracted from the raw mosaic, before
-        // interpolation mixes neighbouring photosites together, so calibrate
-        // does the debayering instead. Debayering here as well would apply it
-        // twice and ruin the frames.
-        script.Append("convert ").Append(ConvertName).Append(" -out=.");
+        // wait: the dark must come off the raw mosaic before interpolation mixes
+        // neighbouring photosites, so calibrate does the debayering instead.
+        // Doing both applies it twice.
+        script.Append("convert ").Append(ConvertName).Append(" -out=").Append(ProcessFolderName);
         if (raw && !calibrating)
         {
             script.Append(" -debayer");
         }
 
         script.AppendLine();
-        script.AppendLine($"cd .");
+        script.AppendLine($"cd {ProcessFolderName}");
 
-        // Calibrate against a master dark when one is available. Siril prefixes
-        // calibrated frames with pp_, so everything downstream shifts.
+        // Calibrate against the master dark. Siril prefixes calibrated frames
+        // with pp_, so everything downstream shifts.
         string sequence = SequenceName;
         if (calibrating)
         {
             script.AppendLine();
-            AppendDarkCalibration(script, raw);
+            AppendCalibrate(script, raw);
             sequence = $"pp_{SequenceName}";
             script.AppendLine();
         }
@@ -97,7 +110,9 @@ public static class SirilScriptBuilder
         // Global star alignment. This is the step that defeats sky rotation.
         script.AppendLine($"register {sequence}");
 
-        // Stack the registered sequence. Siril prefixes registered output with r_.
+        // Stack the registered sequence. Siril prefixes registered output with
+        // r_. The result goes back up to the run folder, where the app looks for
+        // it and where it is not swept into a later conversion.
         script.AppendLine(BuildStackCommand($"r_{sequence}", request, method));
 
         // Autostretch on save only affects the preview copy, not the linear data.
@@ -120,6 +135,19 @@ public static class SirilScriptBuilder
     public const string DarkConvertName = "dark";
 
     public const string MasterDarkName = "master_dark";
+
+    /// <summary>
+    /// Where converted frames and intermediates are written.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from the captures because Siril's convert takes every
+    /// convertible file in the current directory, FITS included. Converting in
+    /// place meant a second run converted the first run's output too, doubling
+    /// the frame count and counting every exposure twice.
+    /// </remarks>
+    public const string ProcessFolderName = "process";
+
+    public const string DarkProcessFolderName = "darkprocess";
 
     /// <summary>
     /// True when the request has a usable set of darks.
@@ -148,15 +176,19 @@ public static class SirilScriptBuilder
     /// measure.
     /// </para>
     /// </remarks>
-    private static void AppendDarkCalibration(StringBuilder script, bool raw)
+    private static void AppendMasterDark(StringBuilder script)
     {
         script.AppendLine($"cd {DarksFolderName}");
-        script.AppendLine($"convert {DarkConvertName} -out=.");
+        script.AppendLine($"convert {DarkConvertName} -out=../{DarkProcessFolderName}");
+        script.AppendLine($"cd ../{DarkProcessFolderName}");
         script.AppendLine($"stack {DarkConvertName}_ rej 3 3 -nonorm -out={MasterDarkName}");
         script.AppendLine("cd ..");
+    }
 
+    private static void AppendCalibrate(StringBuilder script, bool raw)
+    {
         script.Append("calibrate ").Append(SequenceName)
-            .Append(" -dark=").Append(DarksFolderName).Append('/').Append(MasterDarkName);
+            .Append(" -dark=../").Append(DarkProcessFolderName).Append('/').Append(MasterDarkName);
 
         // A raw frame is still a Bayer mosaic at this point, so the calibration
         // has to be told it is working on one, and it takes over the debayering
@@ -181,18 +213,31 @@ public static class SirilScriptBuilder
     public static bool IsRawExtension(string extension) =>
         extension.TrimStart('.').ToLowerInvariant() is "dng" or "raw" or "cr2" or "nef" or "arw";
 
+    /// <summary>
+    /// Builds the stack command.
+    /// </summary>
+    /// <remarks>
+    /// The result stays inside the process folder. Writing it beside the
+    /// captures looks tidier and is wrong: a later run would convert the stack
+    /// and its preview along with the frames, so the second pass counted twelve
+    /// images where there were ten.
+    /// </remarks>
     private static string BuildStackCommand(
         string sequence,
         StackRequest request,
-        StackMethod method) =>
-        method switch
+        StackMethod method)
+    {
+        string output = request.OutputName;
+
+        return method switch
         {
             StackMethod.AverageSigmaClip => string.Create(
                 CultureInfo.InvariantCulture,
-                $"stack {sequence} rej {request.SigmaLow} {request.SigmaHigh} -norm=addscale -out={request.OutputName}"),
+                $"stack {sequence} rej {request.SigmaLow} {request.SigmaHigh} -norm=addscale -out={output}"),
             StackMethod.Median =>
-                $"stack {sequence} med -norm=addscale -out={request.OutputName}",
+                $"stack {sequence} med -norm=addscale -out={output}",
             _ =>
-                $"stack {sequence} mean -norm=addscale -out={request.OutputName}",
+                $"stack {sequence} mean -norm=addscale -out={output}",
         };
+    }
 }

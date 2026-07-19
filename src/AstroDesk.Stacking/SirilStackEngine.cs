@@ -149,16 +149,30 @@ public sealed partial class SirilStackEngine : IStackEngine
     }
 
     /// <summary>
+    /// Where a run's products are written, newest layout first.
+    /// </summary>
+    /// <remarks>
+    /// Results now live in the process folder rather than beside the captures,
+    /// so that a later run does not convert the previous stack along with the
+    /// frames. The run folder is still searched afterwards, so a stack made
+    /// before that change is still found and displayed.
+    /// </remarks>
+    private static IEnumerable<string> OutputFolders(StackRequest request)
+    {
+        yield return Path.Combine(
+            request.WorkingDirectory,
+            SirilScriptBuilder.ProcessFolderName);
+        yield return request.WorkingDirectory;
+    }
+
+    /// <summary>
     /// The stretched TIFF written beside the master, or null when Siril did not
     /// produce one.
     /// </summary>
-    private static string? FindPreview(StackRequest request)
-    {
-        string path = Path.Combine(
-            request.WorkingDirectory,
-            $"{request.OutputName}_preview.tif");
-        return File.Exists(path) ? path : null;
-    }
+    private static string? FindPreview(StackRequest request) =>
+        OutputFolders(request)
+            .Select(folder => Path.Combine(folder, $"{request.OutputName}_preview.tif"))
+            .FirstOrDefault(File.Exists);
 
     private static string? FindOutput(StackRequest request)
     {
@@ -172,12 +186,15 @@ public sealed partial class SirilStackEngine : IStackEngine
             $"{request.OutputName}_preview.tif",
         ];
 
-        foreach (string candidate in candidates)
+        foreach (string folder in OutputFolders(request))
         {
-            string path = Path.Combine(request.WorkingDirectory, candidate);
-            if (File.Exists(path))
+            foreach (string candidate in candidates)
             {
-                return path;
+                string path = Path.Combine(folder, candidate);
+                if (File.Exists(path))
+                {
+                    return path;
+                }
             }
         }
 
