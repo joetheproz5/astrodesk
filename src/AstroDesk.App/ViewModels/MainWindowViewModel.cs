@@ -935,11 +935,24 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        // A path outside the capture folder means something is wrong with the
+        // listing, not with the user. Refusing beats asking the shell to delete
+        // whatever it was pointed at.
+        if (!RecycleBin.IsSafeToDelete(run.FolderPath, PhoneCaptureFolder))
+        {
+            _logger.LogWarning(
+                "Refused to delete {Folder}: it is not inside {Root}.",
+                run.FolderPath,
+                PhoneCaptureFolder);
+            StatusMessage = $"'{run.Name}' is not inside the capture folder, so it was not deleted.";
+            return;
+        }
+
         bool confirmed = await RequestConfirmationAsync(
             "Delete this capture run?",
             $"'{run.Name}' holds {run.FrameCount} frame(s) and " +
             $"{CaptureLibrary.FormatSize(run.TotalBytes)}.\n\n" +
-            "The folder and everything in it will be deleted. This cannot be undone.")
+            "It will be sent to the Recycle Bin, so it can be restored from there.")
             .ConfigureAwait(true);
 
         if (!confirmed)
@@ -949,8 +962,17 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         try
         {
-            Directory.Delete(run.FolderPath, recursive: true);
-            StatusMessage = $"Deleted {run.Name}, freeing {CaptureLibrary.FormatSize(run.TotalBytes)}.";
+            if (RecycleBin.TrySendFolder(run.FolderPath))
+            {
+                StatusMessage =
+                    $"Sent {run.Name} to the Recycle Bin, freeing " +
+                    $"{CaptureLibrary.FormatSize(run.TotalBytes)}.";
+            }
+            else
+            {
+                StatusMessage = $"Windows would not move {run.Name} to the Recycle Bin.";
+            }
+
             RefreshLibrary();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
