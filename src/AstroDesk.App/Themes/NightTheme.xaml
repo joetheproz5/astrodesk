@@ -553,13 +553,14 @@
     </Style>
 
     <!-- Touch scrolling.
-         This previously enabled a hand-rolled TouchScrollBehavior, which set
-         PanningMode=None and IsManipulationEnabled=false to stop the native
-         recognizer competing with it, then drove scrolling from PreviewTouchDown
-         and friends. The net effect was that native panning was switched off and
-         nothing replaced it, so a finger drag did nothing anywhere in the app.
-         WPF's built-in panning already provides drag scrolling with inertia and
-         is far better tested, so the ScrollViewer does it itself.
+         Do not reintroduce a hand-rolled touch scroll behaviour here. The last
+         one set PanningMode=None and IsManipulationEnabled=false to stop the
+         native recognizer competing with it, then drove scrolling itself from
+         PreviewTouchDown and friends. The net effect was that native panning was
+         switched off and nothing replaced it, so a finger drag did nothing
+         anywhere in the app. WPF's built-in panning already provides drag
+         scrolling with inertia and is far better tested, so the ScrollViewer
+         does it itself.
          PanningRatio 1 keeps content moving 1:1 with the finger; the low
          deceleration gives a long, smooth glide rather than an abrupt stop. -->
     <Style TargetType="ScrollViewer">

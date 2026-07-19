@@ -452,7 +452,6 @@
                                         ClipToBounds="True">
                                     <Grid>
                                         <controls:PhonePreviewControl x:Name="PhonePreview"
-                                                                      controls:TouchScrollBehavior.IsExcluded="True"
                                                                       IsHitTestVisible="False"
                                                                       Source="{Binding PreviewImage}"
                                                                       RuleOfThirds="{Binding RuleOfThirds}"
@@ -487,8 +486,7 @@
                                              showing them requires parking scrcpy's window off-screen and
                                              falling back to the captured-frame preview, not hiding the host. -->
                                         <controls:NativeScrcpyHost SourceWindowHandle="{Binding MainScrcpyWindowHandle}"
-                                                                   Visibility="{Binding ShowWirelessPanel, Converter={StaticResource InverseBoolToVisibility}}"
-                                                                   controls:TouchScrollBehavior.IsExcluded="True" />
+                                                                   Visibility="{Binding ShowWirelessPanel, Converter={StaticResource InverseBoolToVisibility}}" />
                                     </Grid>
                                 </Border>
                             </controls:AspectRatioDecorator>
@@ -982,7 +980,6 @@
                 <Grid Visibility="{Binding IsPreviewFullscreen, Converter={StaticResource BoolToVisibility}}"
                       Background="{DynamicResource PreviewBackgroundBrush}">
                     <controls:PhonePreviewControl x:Name="FullscreenPhonePreview"
-                                                  controls:TouchScrollBehavior.IsExcluded="True"
                                                   IsHitTestVisible="False"
                                                   Source="{Binding PreviewImage}"
                                                   RuleOfThirds="{Binding RuleOfThirds}"
@@ -1008,8 +1005,7 @@
                                                   DebugText="{Binding DebugOverlayText}"
                                                   Rotation="{Binding PreviewRotation}"
                                                   ScrcpyClientSize="{Binding ScrcpyClientSize}" />
-                    <controls:NativeScrcpyHost SourceWindowHandle="{Binding FullscreenScrcpyWindowHandle}"
-                                               controls:TouchScrollBehavior.IsExcluded="True" />
+                    <controls:NativeScrcpyHost SourceWindowHandle="{Binding FullscreenScrcpyWindowHandle}" />
                     <Button Content="Exit fullscreen"
                             Command="{Binding TogglePreviewFullscreenCommand}"
                             Style="{StaticResource PanelButton}"
