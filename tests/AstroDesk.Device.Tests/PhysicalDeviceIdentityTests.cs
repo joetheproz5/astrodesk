@@ -17,7 +17,9 @@ public sealed class PhysicalDeviceIdentityTests
     private static AdbDevice Device(string serial, string model = "SCG20", string product = "SCG20_jp_kdi") =>
         new(serial, AdbDeviceState.Device, model, product, "SCG20");
 
-    // The real pair seen on the bench.
+    // Shaped like the pair adb reports for one handset on USB and mDNS at once.
+    // The serial is invented: the test needs the two to share one, not to match
+    // any particular device.
     private const string UsbSerial = "R3XT00SAMPLE";
     private const string MdnsSerial = "adb-R3XT00SAMPLE-Qx7bZk._adb-tls-connect._tcp";
 

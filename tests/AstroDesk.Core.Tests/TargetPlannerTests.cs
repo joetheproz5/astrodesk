@@ -15,7 +15,10 @@ namespace AstroDesk.Core.Tests;
 /// </remarks>
 public sealed class TargetPlannerTests
 {
-    // A mid-northern test site.
+    // A mid-northern test site. The latitude is what the seasonal assertions
+    // below depend on - the Milky Way core only just clears a usable altitude
+    // from here in July, and not at all in January - so it cannot move far
+    // without changing what the tests mean.
     private const double Latitude = 34.0;
     private const double Longitude = 35.0;
 
