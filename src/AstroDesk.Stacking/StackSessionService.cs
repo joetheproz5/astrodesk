@@ -13,9 +13,24 @@ public sealed class StackFrameAddedEventArgs(StackFrame frame, int collected, in
     public int Target { get; } = target;
 }
 
+/// <summary>
+/// Reports a dark copied into the current run without presenting it as a light frame.
+/// </summary>
+/// <param name="frame">The copied dark frame.</param>
+/// <param name="collected">Total dark frames collected in this run.</param>
+public sealed class StackDarkFrameAddedEventArgs(StackFrame frame, int collected)
+    : EventArgs
+{
+    public StackFrame Frame { get; } = frame;
+
+    public int Collected { get; } = collected;
+}
+
 public interface IStackSessionService
 {
     event EventHandler<StackFrameAddedEventArgs>? FrameAdded;
+
+    event EventHandler<StackDarkFrameAddedEventArgs>? DarkFrameAdded;
 
     /// <summary>
     /// True while incoming captures are being collected for stacking.
@@ -23,14 +38,29 @@ public interface IStackSessionService
     bool IsArmed { get; }
 
     /// <summary>
+    /// True while incoming captures are being routed into this run's darks folder.
+    /// </summary>
+    bool IsCollectingDarks { get; }
+
+    /// <summary>
     /// How many frames the user asked for. Zero means keep collecting until stopped.
     /// </summary>
     int TargetFrameCount { get; }
 
     /// <summary>
+    /// Number of dark frames collected separately from the light target.
+    /// </summary>
+    int DarkFrameCount { get; }
+
+    /// <summary>
     /// Folder holding this run's frames, or empty when not armed.
     /// </summary>
     string SessionFolder { get; }
+
+    /// <summary>
+    /// Folder holding this run's dark frames, or empty before a run exists.
+    /// </summary>
+    string DarksFolder { get; }
 
     IReadOnlyList<StackFrame> Frames { get; }
 
@@ -42,8 +72,20 @@ public interface IStackSessionService
     void Disarm();
 
     /// <summary>
-    /// Offers a newly captured file to the run. Ignored when not armed, when the
-    /// target is already met, or when the file is not a stackable image.
+    /// Routes subsequent captures into the current run's darks folder and pauses
+    /// light collection. A run must already exist.
+    /// </summary>
+    void StartDarkCollection();
+
+    /// <summary>
+    /// Stops routing captures into the darks folder.
+    /// </summary>
+    void StopDarkCollection();
+
+    /// <summary>
+    /// Offers a newly captured file to the active light or dark collection mode.
+    /// Ignored when collection is off, when the light target is already met, or
+    /// when the file is not a stackable image.
     /// </summary>
     StackFrame? Offer(string capturedPath, DateTimeOffset capturedAt);
 
@@ -55,7 +97,8 @@ public interface IStackSessionService
 }
 
 /// <summary>
-/// Collects captures into a per-run folder while stack mode is armed.
+/// Collects light captures into a per-run folder and dark captures into its
+/// dedicated calibration subfolder.
 /// </summary>
 /// <remarks>
 /// Frames are copied rather than moved: the originals stay in the user's normal
@@ -76,11 +119,30 @@ public sealed class StackSessionService(ILogger<StackSessionService>? logger = n
 
     public event EventHandler<StackFrameAddedEventArgs>? FrameAdded;
 
+    public event EventHandler<StackDarkFrameAddedEventArgs>? DarkFrameAdded;
+
     public bool IsArmed { get; private set; }
+
+    public bool IsCollectingDarks { get; private set; }
 
     public int TargetFrameCount { get; private set; }
 
+    public int DarkFrameCount { get; private set; }
+
     public string SessionFolder { get; private set; } = string.Empty;
+
+    public string DarksFolder
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return SessionFolder.Length == 0
+                    ? string.Empty
+                    : Path.Combine(SessionFolder, SirilScriptBuilder.DarksFolderName);
+            }
+        }
+    }
 
     public IReadOnlyList<StackFrame> Frames
     {
@@ -101,6 +163,7 @@ public sealed class StackSessionService(ILogger<StackSessionService>? logger = n
         lock (_sync)
         {
             _frames.Clear();
+            DarkFrameCount = 0;
             string folder = Path.Combine(
                 rootFolder,
                 $"stack-{DateTimeOffset.Now:yyyyMMdd-HHmmss}");
@@ -108,6 +171,7 @@ public sealed class StackSessionService(ILogger<StackSessionService>? logger = n
             SessionFolder = folder;
             TargetFrameCount = targetFrameCount;
             IsArmed = true;
+            IsCollectingDarks = false;
             _logger.LogInformation(
                 "Stack mode armed for {Target} frames in {Folder}.",
                 targetFrameCount,
@@ -121,9 +185,39 @@ public sealed class StackSessionService(ILogger<StackSessionService>? logger = n
         lock (_sync)
         {
             IsArmed = false;
+            IsCollectingDarks = false;
         }
 
         _logger.LogInformation("Stack mode disarmed.");
+    }
+
+    public void StartDarkCollection()
+    {
+        lock (_sync)
+        {
+            if (SessionFolder.Length == 0)
+            {
+                throw new InvalidOperationException(
+                    "Start a stack run before collecting dark frames.");
+            }
+
+            Directory.CreateDirectory(
+                Path.Combine(SessionFolder, SirilScriptBuilder.DarksFolderName));
+            IsArmed = false;
+            IsCollectingDarks = true;
+        }
+
+        _logger.LogInformation("Dark collection started in {Folder}.", DarksFolder);
+    }
+
+    public void StopDarkCollection()
+    {
+        lock (_sync)
+        {
+            IsCollectingDarks = false;
+        }
+
+        _logger.LogInformation("Dark collection stopped with {Count} frames.", DarkFrameCount);
     }
 
     public StackFrame? Offer(string capturedPath, DateTimeOffset capturedAt)
@@ -134,22 +228,26 @@ public sealed class StackSessionService(ILogger<StackSessionService>? logger = n
         }
 
         StackFrame frame;
-        int collected;
-        int target;
+        StackFrameAddedEventArgs? lightAdded = null;
+        StackDarkFrameAddedEventArgs? darkAdded = null;
 
         lock (_sync)
         {
-            if (!IsArmed || SessionFolder.Length == 0)
+            if ((!IsArmed && !IsCollectingDarks) || SessionFolder.Length == 0)
             {
                 return null;
             }
 
-            if (TargetFrameCount > 0 && _frames.Count >= TargetFrameCount)
+            bool dark = IsCollectingDarks;
+            if (!dark && TargetFrameCount > 0 && _frames.Count >= TargetFrameCount)
             {
                 return null;
             }
 
-            string destination = Path.Combine(SessionFolder, Path.GetFileName(capturedPath));
+            string destinationFolder = dark
+                ? Path.Combine(SessionFolder, SirilScriptBuilder.DarksFolderName)
+                : SessionFolder;
+            string destination = Path.Combine(destinationFolder, Path.GetFileName(capturedPath));
             try
             {
                 File.Copy(capturedPath, destination, overwrite: true);
@@ -164,20 +262,38 @@ public sealed class StackSessionService(ILogger<StackSessionService>? logger = n
             }
 
             frame = new StackFrame(destination, capturedAt);
-            _frames.Add(frame);
-            collected = _frames.Count;
-            target = TargetFrameCount;
-
-            // Stop on our own once the requested number of frames has landed, so
-            // a long unattended session does not keep copying after the goal.
-            if (TargetFrameCount > 0 && collected >= TargetFrameCount)
+            if (dark)
             {
-                IsArmed = false;
-                _logger.LogInformation("Stack target of {Target} frames reached.", TargetFrameCount);
+                DarkFrameCount++;
+                darkAdded = new StackDarkFrameAddedEventArgs(frame, DarkFrameCount);
+            }
+            else
+            {
+                _frames.Add(frame);
+                int collected = _frames.Count;
+                lightAdded = new StackFrameAddedEventArgs(frame, collected, TargetFrameCount);
+
+                // Stop on our own once the requested number of light frames has
+                // landed. Darks have their own count and never consume this target.
+                if (TargetFrameCount > 0 && collected >= TargetFrameCount)
+                {
+                    IsArmed = false;
+                    _logger.LogInformation(
+                        "Stack target of {Target} frames reached.",
+                        TargetFrameCount);
+                }
             }
         }
 
-        FrameAdded?.Invoke(this, new StackFrameAddedEventArgs(frame, collected, target));
+        if (darkAdded is not null)
+        {
+            DarkFrameAdded?.Invoke(this, darkAdded);
+        }
+        else if (lightAdded is not null)
+        {
+            FrameAdded?.Invoke(this, lightAdded);
+        }
+
         return frame;
     }
 

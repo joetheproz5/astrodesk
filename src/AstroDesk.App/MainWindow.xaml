@@ -2005,8 +2005,35 @@
                                           IsChecked="{Binding IsStackArmed, Mode=OneWay}"
                                           Command="{Binding ToggleStackModeCommand}"
                                           Style="{StaticResource TouchToggleButton}"
+                                          IsEnabled="{Binding IsCollectingDarks, Converter={StaticResource BooleanNegation}}"
                                           Margin="0,0,0,10"
                                           ToolTip="While armed, every photo taken on the phone is collected into this run" />
+
+                            <Border Background="{DynamicResource PanelRaisedBrush}"
+                                    BorderBrush="{DynamicResource WarningBrush}"
+                                    BorderThickness="2,0,0,0"
+                                    Padding="12"
+                                    Margin="0,0,0,12">
+                                <StackPanel>
+                                    <TextBlock Text="DARK FRAMES"
+                                               Style="{StaticResource RailHeader}"
+                                               Margin="0,0,0,5" />
+                                    <TextBlock Text="Cover the lens completely. Darks must use the same exposure and ISO as the lights, at the same sensor temperature — mismatched darks are worthless and can make calibration worse."
+                                               Style="{StaticResource MutedText}"
+                                               FontSize="10.5"
+                                               TextWrapping="Wrap"
+                                               Margin="0,0,0,9" />
+                                    <ToggleButton Content="Collect darks"
+                                                  IsChecked="{Binding IsCollectingDarks, Mode=OneWay}"
+                                                  Command="{Binding ToggleDarkCollectionCommand}"
+                                                  Style="{StaticResource TouchToggleButton}"
+                                                  Margin="0,0,0,6"
+                                                  ToolTip="Routes new captures into this run's darks folder without adding them to the light stack" />
+                                    <TextBlock Text="{Binding StackDarkCountText}"
+                                               Style="{StaticResource TelemetrySub}"
+                                               HorizontalAlignment="Right" />
+                                </StackPanel>
+                            </Border>
 
                             <!-- RangeBase.Value binds two-way by default, and StackProgress is a
                                  computed getter with no setter, so the mode must be stated

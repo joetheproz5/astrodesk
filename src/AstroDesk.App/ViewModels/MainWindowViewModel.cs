@@ -138,6 +138,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _livePreview = livePreview;
         _livePreviewRenderer = livePreviewRenderer;
         _stackSession.FrameAdded += HandleStackFrameAdded;
+        _stackSession.DarkFrameAdded += HandleStackDarkFrameAdded;
         _livePreview.Updated += HandleLivePreviewUpdated;
         _autoCapture.Triggered += HandleAutoCaptureTriggered;
         _autoCapture.Finished += HandleAutoCaptureFinished;
@@ -3892,6 +3893,12 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private int _stackCollectedCount;
 
     [ObservableProperty]
+    private bool _isCollectingDarks;
+
+    [ObservableProperty]
+    private int _stackDarkCount;
+
+    [ObservableProperty]
     private string _stackStatusText = "Stack mode is off.";
 
     [ObservableProperty]
@@ -3925,11 +3932,21 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         ? $"{StackCollectedCount} / {StackTargetFrameCount} frames"
         : $"{StackCollectedCount} frames";
 
+    public string StackDarkCountText => StackDarkCount == 1
+        ? "1 dark collected"
+        : $"{StackDarkCount} darks collected";
+
     public bool IsSirilAvailable => _stackEngine.IsAvailable;
 
     [RelayCommand]
     private void ToggleStackMode()
     {
+        if (_stackSession.IsCollectingDarks)
+        {
+            StackStatusText = "Stop dark collection before starting another light run.";
+            return;
+        }
+
         if (_stackSession.IsArmed)
         {
             _stackSession.Disarm();
@@ -3939,6 +3956,41 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         _ = TryArmStackRun();
+    }
+
+    [RelayCommand]
+    private void ToggleDarkCollection()
+    {
+        if (_stackSession.IsCollectingDarks)
+        {
+            _stackSession.StopDarkCollection();
+            IsCollectingDarks = false;
+            StackStatusText = $"Dark collection stopped with {StackDarkCountText}.";
+            NotifyAutoCaptureDerived();
+            return;
+        }
+
+        if (_stackSession.SessionFolder.Length == 0)
+        {
+            StackStatusText =
+                "Start a Stack mode run and collect the light frames before collecting darks.";
+            return;
+        }
+
+        try
+        {
+            _stackSession.StartDarkCollection();
+            IsStackArmed = false;
+            IsCollectingDarks = true;
+            StackDarkCount = _stackSession.DarkFrameCount;
+            StackStatusText =
+                "Collecting darks. Keep the lens fully covered and do not change exposure or ISO.";
+            NotifyAutoCaptureDerived();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            StackStatusText = $"Could not start dark collection: {exception.Message}";
+        }
     }
 
     /// <summary>
@@ -3959,6 +4011,8 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             LivePreviewFramesText = string.Empty;
             StackFrameNames.Clear();
             StackCollectedCount = 0;
+            StackDarkCount = 0;
+            IsCollectingDarks = false;
             StackResultText = string.Empty;
             StackResultPath = string.Empty;
             StackResultImage = null;
@@ -4082,6 +4136,15 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                     : $"Target reached: {StackProgressText}. Ready to stack.";
             });
 
+    private void HandleStackDarkFrameAdded(object? sender, StackDarkFrameAddedEventArgs args) =>
+        Dispatch(
+            () =>
+            {
+                StackDarkCount = args.Collected;
+                IsCollectingDarks = _stackSession.IsCollectingDarks;
+                StackStatusText = $"Collecting darks… {StackDarkCountText}.";
+            });
+
     partial void OnStackTargetFrameCountChanged(int value)
     {
         OnPropertyChanged(nameof(StackProgress));
@@ -4094,6 +4157,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(StackProgress));
         OnPropertyChanged(nameof(StackProgressText));
     }
+
+    partial void OnStackDarkCountChanged(int value) =>
+        OnPropertyChanged(nameof(StackDarkCountText));
 
     partial void OnSirilPathChanged(string value)
     {
@@ -4161,6 +4227,11 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     {
         get
         {
+            if (IsCollectingDarks)
+            {
+                return "Dark collection runs until stopped.";
+            }
+
             if (StackTargetFrameCount <= 0)
             {
                 return "Runs until stopped.";
@@ -4198,7 +4269,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         // collecting produces a folder of captures on the phone and an empty
         // stack run, and the failure is silent: the shutter works, the files
         // import, and the frame list simply stays at zero.
-        if (!_stackSession.IsArmed && !TryArmStackRun())
+        if (!_stackSession.IsArmed &&
+            !_stackSession.IsCollectingDarks &&
+            !TryArmStackRun())
         {
             AutoCaptureStatusText = StackStatusText;
             return;
@@ -4226,14 +4299,15 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                         serial,
                         TimeSpan.FromSeconds(Math.Max(0, ExposureSeconds)),
                         TimeSpan.FromSeconds(Math.Max(0, AutoCaptureWriteDelaySeconds)),
-                        StackTargetFrameCount),
+                        _stackSession.IsCollectingDarks ? 0 : StackTargetFrameCount),
                     _lifetimeCancellation.Token)
                 .ConfigureAwait(true);
 
             IsAutoCaptureRunning = true;
-            AutoCaptureStatusText =
-                "Running. Each shot fires once the previous photo lands. " +
-                "The camera app must be open and its volume key set to take pictures.";
+            AutoCaptureStatusText = _stackSession.IsCollectingDarks
+                ? "Running dark capture until stopped. Keep the lens covered and the light-frame exposure and ISO unchanged."
+                : "Running. Each shot fires once the previous photo lands. " +
+                  "The camera app must be open and its volume key set to take pictures.";
         }
         catch (Exception exception)
         {

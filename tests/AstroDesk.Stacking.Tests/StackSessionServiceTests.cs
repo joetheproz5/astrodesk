@@ -148,6 +148,86 @@ public sealed class StackSessionServiceTests : IDisposable
     }
 
     [Fact]
+    public void StartDarkCollection_RequiresAnExistingRun()
+    {
+        var service = new StackSessionService();
+
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
+            service.StartDarkCollection);
+
+        Assert.Contains("stack run", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Offer_CopiesDarkCapturesIntoTheRunDarksFolder()
+    {
+        var service = new StackSessionService();
+        string run = service.Arm(_root, targetFrameCount: 30);
+        service.StartDarkCollection();
+        string capture = CreateCapture("covered.dng");
+
+        StackFrame? dark = service.Offer(capture, DateTimeOffset.Now);
+
+        Assert.NotNull(dark);
+        Assert.Equal(
+            Path.Combine(run, SirilScriptBuilder.DarksFolderName, "covered.dng"),
+            dark!.Path);
+        Assert.True(File.Exists(dark.Path));
+        // The normal phone import remains the user's untouched source capture.
+        Assert.True(File.Exists(capture));
+    }
+
+    [Fact]
+    public void Offer_DarkCapturesDoNotCountTowardTheLightTarget()
+    {
+        var service = new StackSessionService();
+        service.Arm(_root, targetFrameCount: 2);
+        Assert.NotNull(service.Offer(CreateCapture("light.dng"), DateTimeOffset.Now));
+        service.StartDarkCollection();
+
+        Assert.NotNull(service.Offer(CreateCapture("dark-a.dng"), DateTimeOffset.Now));
+        Assert.NotNull(service.Offer(CreateCapture("dark-b.dng"), DateTimeOffset.Now));
+
+        Assert.Single(service.Frames);
+        Assert.Equal(2, service.DarkFrameCount);
+        // A light target must never stop a dark run after the same number of darks.
+        Assert.True(service.IsCollectingDarks);
+    }
+
+    [Fact]
+    public void Offer_DarkCapturesDoNotRaiseTheLightFrameEvent()
+    {
+        var service = new StackSessionService();
+        service.Arm(_root, targetFrameCount: 30);
+        service.StartDarkCollection();
+        int lightEvents = 0;
+        service.FrameAdded += (_, _) => lightEvents++;
+
+        service.Offer(CreateCapture("dark.dng"), DateTimeOffset.Now);
+
+        // The app's thumbnail grid and live preview subscribe only to this event.
+        Assert.Equal(0, lightEvents);
+        Assert.Empty(service.Frames);
+        Assert.Null(service.ResolveFrameExtension());
+    }
+
+    [Fact]
+    public void DarkFrameAdded_ReportsDarkProgressSeparately()
+    {
+        var service = new StackSessionService();
+        service.Arm(_root, targetFrameCount: 30);
+        service.StartDarkCollection();
+        StackDarkFrameAddedEventArgs? last = null;
+        service.DarkFrameAdded += (_, args) => last = args;
+
+        service.Offer(CreateCapture("dark.dng"), DateTimeOffset.Now);
+
+        Assert.NotNull(last);
+        Assert.Equal(1, last!.Collected);
+        Assert.Contains(SirilScriptBuilder.DarksFolderName, last.Frame.Path);
+    }
+
+    [Fact]
     public void StackFrame_IdentifiesRaw()
     {
         Assert.True(new StackFrame("a.dng", DateTimeOffset.Now).IsRaw);
