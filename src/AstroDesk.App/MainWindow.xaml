@@ -2023,8 +2023,15 @@
                                                FontSize="10.5"
                                                TextWrapping="Wrap"
                                                Margin="0,0,0,9" />
+                                    <!-- Two-way on purpose. The click flips the button before
+                                         the command runs, and a one-way binding will not
+                                         repaint it unless the source value actually changes -
+                                         so a refused start left the toggle looking armed while
+                                         nothing was collecting. Two-way lets the click write
+                                         true, and the command writes false straight back, which
+                                         is a real change the binding does act on. -->
                                     <ToggleButton Content="Collect darks"
-                                                  IsChecked="{Binding IsCollectingDarks, Mode=OneWay}"
+                                                  IsChecked="{Binding IsCollectingDarks, Mode=TwoWay}"
                                                   Command="{Binding ToggleDarkCollectionCommand}"
                                                   Style="{StaticResource TouchToggleButton}"
                                                   Margin="0,0,0,6"

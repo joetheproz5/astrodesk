@@ -3974,6 +3974,13 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         {
             StackStatusText =
                 "Start a Stack mode run and collect the light frames before collecting darks.";
+
+            // The click already set this true through the two-way binding.
+            // Putting it back is what repaints the button; leaving it would show
+            // an armed toggle while nothing is collecting, and dark frames are
+            // supposed to look like nothing, so the toggle is the only evidence
+            // the mode is on at all.
+            IsCollectingDarks = false;
             return;
         }
 
@@ -3990,6 +3997,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             StackStatusText = $"Could not start dark collection: {exception.Message}";
+            IsCollectingDarks = false;
         }
     }
 
