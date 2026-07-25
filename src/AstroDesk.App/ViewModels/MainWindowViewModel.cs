@@ -75,6 +75,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private bool _selectingLocation;
     private bool _suppressLocationRefresh;
     private long _conditionsRequestVersion;
+    private string? _pendingConditionsStatus;
     private PreviewFrameSnapshot? _pendingPreviewFrame;
 
     /// <summary>
@@ -2329,6 +2330,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 _latestWeather,
                 _latestAstronomy,
                 EnableNetworkConditions);
+            ResolveConditionsLoadingStatus("Ready.");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -2336,8 +2338,38 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         catch (Exception exception)
         {
             _logger.LogWarning(exception, "Conditions refresh failed.");
+            _pendingConditionsStatus = null;
             StatusMessage = $"Conditions unavailable: {exception.Message}";
         }
+    }
+
+    /// <summary>
+    /// Shows a conditions-loading message and remembers it, so a later refresh can retire it.
+    /// </summary>
+    private void SetConditionsLoadingStatus(string message)
+    {
+        _pendingConditionsStatus = message;
+        StatusMessage = message;
+    }
+
+    /// <summary>
+    /// Retires a conditions-loading message once the load finishes. Anything the user has been
+    /// told since — a device drop, a session change, a capture failure — is left on screen,
+    /// because that is more useful than the fact that the weather arrived.
+    /// </summary>
+    private void ResolveConditionsLoadingStatus(string resolvedMessage)
+    {
+        if (_pendingConditionsStatus is null)
+        {
+            return;
+        }
+
+        if (string.Equals(StatusMessage, _pendingConditionsStatus, StringComparison.Ordinal))
+        {
+            StatusMessage = resolvedMessage;
+        }
+
+        _pendingConditionsStatus = null;
     }
 
     [RelayCommand]
@@ -2395,9 +2427,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             : "Using this laptop's current location";
         LocationCoordinateText = automaticLocation.CoordinateText;
         TimeZoneText = FormatTimeZoneLabel(automaticLocation.TimeZoneId);
-        StatusMessage = isIpEstimate
+        SetConditionsLoadingStatus(isIpEstimate
             ? "Windows location was unavailable. Loading live conditions from an approximate public-IP location."
-            : "Current location detected. Loading live conditions for this area.";
+            : "Current location detected. Loading live conditions for this area.");
 
         if (_initialized)
         {
