@@ -14,6 +14,35 @@ The project follows [Semantic Versioning](https://semver.org/) while pre-1.0 rel
 - A Windows Graphics Capture backend with Win32 fallback.
 - Signed installer packaging after a reproducible release process is established.
 
+## [0.2.0] - 2026-07-25
+
+### Added
+
+- Added a **Stack** tab that collects a run of captures and integrates them into one low-noise frame, with a live stack preview and a running frame count.
+- Added in-app dark frame collection, master dark subtraction, and a single flow that covers collecting darks and calibrating the lights with them.
+- Added a **Plan** tab listing tonight's targets with their dark window, peak altitude, hours above 25°, and Moon separation.
+- Added a **Sky** tab showing the light pollution map centred on the current site.
+- Added a **Library** tab for the capture runs still on disk, with deletion to the Recycle Bin restricted to the capture folder.
+- Added native Windows touch handling on the embedded preview, with ADB tap and swipe forwarding over both USB and wireless connections.
+- Added Wireless ADB QR pairing with a generated one-time secret and exact mDNS service matching.
+- Added recognition of one phone reached over both cable and wireless as a single device, with its vitals shown.
+
+### Changed
+
+- Rebuilt the shooting workspace around a landscape S23 Ultra preview with touch-first controls, pinned live conditions, and side-mounted framing controls.
+- The shooting score now gates on sky brightness and cloud cover rather than averaging them into the total.
+- Raised the preview quality when the phone is attached by cable.
+- Framing guides now draw inside the camera's viewfinder, and the focus loupe follows the shooting zone over the live scrcpy video.
+
+### Fixed
+
+- The status line no longer claims live conditions are still loading after they have arrived.
+- The preview returns automatically when scrcpy dies, and an unresponsive phone no longer wedges the preview buttons.
+- A repeated stack no longer counts its own output as an input frame.
+- A lost device is now explained by how the phone was actually attached.
+- The cable profile no longer destabilises the USB link.
+- Normalised line endings and removed stray byte-order marks so the repository passes its own formatting check.
+
 ## [0.1.11] - 2026-07-17
 
 ### Fixed
