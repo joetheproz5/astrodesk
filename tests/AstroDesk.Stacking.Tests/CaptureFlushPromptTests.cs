@@ -1,4 +1,4 @@
-﻿using AstroDesk.Device.Adb;
+using AstroDesk.Device.Adb;
 using AstroDesk.Stacking;
 using Xunit;
 

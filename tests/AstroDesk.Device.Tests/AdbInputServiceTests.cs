@@ -1,4 +1,4 @@
-﻿using AstroDesk.Device.Adb;
+using AstroDesk.Device.Adb;
 using AstroDesk.Device.Processes;
 
 namespace AstroDesk.Device.Tests;
