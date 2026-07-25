@@ -9,10 +9,23 @@ namespace AstroDesk.Device.Adb;
 
 public interface IAdbCommandExecutor
 {
+    /// <summary>
+    /// Runs an adb command against a device.
+    /// </summary>
+    /// <param name="serial">Device to target, or null for the only one attached.</param>
+    /// <param name="arguments">Arguments following the device selector.</param>
+    /// <param name="cancellationToken">Cancels the command.</param>
+    /// <param name="timeout">
+    /// How long to allow before the command is given up on. Defaults to the
+    /// process runner's own limit, which suits a query but not a file transfer:
+    /// pulling a 28 MB raw frame over a slow link legitimately takes longer, and
+    /// timing that out would break photo import rather than protect anything.
+    /// </param>
     Task<ProcessExecutionResult> ExecuteAsync(
         string? serial,
         IReadOnlyList<string> arguments,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        TimeSpan? timeout = null);
 }
 
 public interface IAdbDeviceClient
@@ -49,6 +62,9 @@ public interface IAdbWirelessClient
     Task<IReadOnlyList<AdbMdnsService>> GetMdnsServicesAsync(
         CancellationToken cancellationToken = default);
 
+    Task RestartWirelessDiscoveryAsync(
+        CancellationToken cancellationToken = default);
+
     Task ConnectWirelessAsync(
         string endpoint,
         CancellationToken cancellationToken = default);
@@ -80,7 +96,8 @@ public sealed class AdbService : IAdbCommandExecutor, IAdbDeviceClient, IAdbWire
     public async Task<ProcessExecutionResult> ExecuteAsync(
         string? serial,
         IReadOnlyList<string> arguments,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        TimeSpan? timeout = null)
     {
         ArgumentNullException.ThrowIfNull(arguments);
         var adbPath = _executableLocator.Resolve(
@@ -103,7 +120,8 @@ public sealed class AdbService : IAdbCommandExecutor, IAdbDeviceClient, IAdbWire
                 adbPath,
                 finalArguments,
                 SensitiveValues: sensitiveValues,
-                CreateNoWindow: true),
+                CreateNoWindow: true,
+                Timeout: timeout),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -170,11 +188,32 @@ public sealed class AdbService : IAdbCommandExecutor, IAdbDeviceClient, IAdbWire
 
         if (connected.Count > 1)
         {
+            // One phone plugged in and also paired over Wi-Fi appears twice, and
+            // being told to choose between two views of the same handset is a
+            // choice with no meaning. Collapse those first; only genuinely
+            // different phones are worth stopping for.
+            IReadOnlyList<AdbDevice> distinct = PhysicalDeviceIdentity.Collapse(connected);
+            if (distinct.Count == 1)
+            {
+                AdbDevice chosen = distinct[0];
+                bool overCable =
+                    Scrcpy.DeviceTransportDetector.Detect(chosen.Serial) ==
+                    Scrcpy.DeviceTransport.Cable;
+
+                return new AdbConnectionSnapshot(
+                    AdbConnectionState.Connected,
+                    devices,
+                    chosen,
+                    overCable
+                        ? $"{chosen.DisplayName} connected by cable, also paired wirelessly."
+                        : $"{chosen.DisplayName} connected.");
+            }
+
             return new AdbConnectionSnapshot(
                 AdbConnectionState.MultipleDevices,
                 devices,
                 null,
-                "Multiple authorized Android devices are connected. Select one to continue.");
+                $"{distinct.Count} different Android devices are connected. Pick one under DEVICE to continue.");
         }
 
         if (devices.Any(static device => device.State == AdbDeviceState.Unauthorized))
@@ -293,8 +332,19 @@ public sealed class AdbService : IAdbCommandExecutor, IAdbDeviceClient, IAdbWire
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(endpoint);
-        var result = await ExecuteAsync(null, ["connect", endpoint.Trim()], cancellationToken).ConfigureAwait(false);
+        string safeEndpoint = endpoint.Trim();
+        var result = await ExecuteAsync(null, ["connect", safeEndpoint], cancellationToken).ConfigureAwait(false);
         EnsureSucceeded(result, "connect");
+        string response = $"{result.StandardOutput}\n{result.StandardError}";
+        if (response.Contains("failed to connect", StringComparison.OrdinalIgnoreCase) ||
+            response.Contains("unable to connect", StringComparison.OrdinalIgnoreCase) ||
+            response.Contains("cannot connect", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new AdbCommandException(
+                "connect",
+                result.ExitCode,
+                "The phone did not accept the ADB connection. Use the IP address and port from the main Wireless debugging screen, not the temporary pairing port.");
+        }
     }
 
     public async Task DisconnectWirelessAsync(
@@ -389,6 +439,27 @@ public sealed class AdbService : IAdbCommandExecutor, IAdbDeviceClient, IAdbWire
         return AdbMdnsParser.Parse(result.StandardOutput);
     }
 
+    public async Task RestartWirelessDiscoveryAsync(
+        CancellationToken cancellationToken = default)
+    {
+        ProcessExecutionResult stopResult = await ExecuteGlobalAsync(
+            ["kill-server"],
+            [],
+            cancellationToken).ConfigureAwait(false);
+        EnsureSucceeded(stopResult, "kill-server");
+
+        await Task.Delay(TimeSpan.FromMilliseconds(350), cancellationToken).ConfigureAwait(false);
+        ProcessExecutionResult startResult = await ExecuteGlobalAsync(
+            ["start-server"],
+            [],
+            cancellationToken,
+            new Dictionary<string, string?>
+            {
+                ["ADB_MDNS_OPENSCREEN"] = "1",
+            }).ConfigureAwait(false);
+        EnsureSucceeded(startResult, "start-server");
+    }
+
     public async Task<string> ResolveConnectedSerialAsync(
         string? preferredSerial = null,
         CancellationToken cancellationToken = default)
@@ -431,7 +502,8 @@ public sealed class AdbService : IAdbCommandExecutor, IAdbDeviceClient, IAdbWire
     private async Task<ProcessExecutionResult> ExecuteGlobalAsync(
         IReadOnlyList<string> arguments,
         IReadOnlyCollection<string> sensitiveValues,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string?>? environmentVariables = null)
     {
         var adbPath = _executableLocator.Resolve(
             new ExecutableRequest("adb.exe", _options.AdbExecutablePath, "ASTRODESK_ADB_PATH"));
@@ -439,6 +511,7 @@ public sealed class AdbService : IAdbCommandExecutor, IAdbDeviceClient, IAdbWire
             new ProcessInvocation(
                 adbPath,
                 arguments,
+                EnvironmentVariables: environmentVariables,
                 SensitiveValues: sensitiveValues,
                 CreateNoWindow: true),
             cancellationToken).ConfigureAwait(false);

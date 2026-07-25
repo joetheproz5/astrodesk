@@ -21,6 +21,9 @@ public sealed class ScrcpyArgumentBuilderTests
 
         Assert.Equal("--window-title", arguments[0]);
         Assert.Equal("AstroDesk-Test-Window", arguments[1]);
+        Assert.Contains("--window-x=-32000", arguments);
+        Assert.Contains("--window-y=-32000", arguments);
+        Assert.Contains("--capture-orientation=@270", arguments);
         Assert.Contains("--no-audio", arguments);
         Assert.Contains("--video-bit-rate=16M", arguments);
         Assert.Contains("--max-size=1920", arguments);

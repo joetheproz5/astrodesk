@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
 using AstroDesk.App.Controls;
@@ -19,25 +20,22 @@ public interface IPreviewInputCoordinator
 public sealed class PreviewInputCoordinator(
     IInputForwarder directInput,
     IInputRouter inputRouter,
-    IAdbInputService adbInput,
     IScrcpyService scrcpy,
     IDeviceMonitor deviceMonitor,
     CoordinateMapper coordinateMapper) : IPreviewInputCoordinator
 {
+    private static readonly long MinimumMoveIntervalTicks = Math.Max(1, Stopwatch.Frequency / 120);
+
     private readonly IInputForwarder _directInput = directInput;
     private readonly IInputRouter _inputRouter = inputRouter;
-    private readonly IAdbInputService _adbInput = adbInput;
     private readonly IScrcpyService _scrcpy = scrcpy;
     private readonly IDeviceMonitor _deviceMonitor = deviceMonitor;
     private readonly CoordinateMapper _coordinateMapper = coordinateMapper;
-    private MappedPoint? _dragStart;
-    private DateTimeOffset _dragStartedAt;
     private bool _leftDown;
     private bool _rightDown;
-    private bool _directFailed;
-    private MappedPoint? _touchStart;
+    private MappedPoint? _mouseLast;
     private MappedPoint? _touchLast;
-    private DateTimeOffset _touchStartedAt;
+    private long _lastMoveForwardedTimestamp;
 
     public async Task HandleAsync(
         PreviewInputEventArgs input,
@@ -54,9 +52,26 @@ public sealed class PreviewInputCoordinator(
         {
             if (input.Kind == PreviewInputKind.TouchUp)
             {
-                await FinishTouchAsync(serial, _touchLast, context, cancellationToken).ConfigureAwait(false);
+                if (_touchLast is { } lastTouchPoint)
+                {
+                    HandleMouseUp(window, MouseButton.Left, lastTouchPoint);
+                    _touchLast = null;
+                }
+
                 return;
             }
+
+            if (input.Kind == PreviewInputKind.MouseUp)
+            {
+                if (_mouseLast is { } lastMousePoint)
+                {
+                    HandleMouseUp(window, input.MouseButton, lastMousePoint);
+                    _mouseLast = null;
+                }
+
+                return;
+            }
+
             if (input.Kind is not (PreviewInputKind.KeyDown or PreviewInputKind.TextInput))
             {
                 return;
@@ -70,35 +85,41 @@ public sealed class PreviewInputCoordinator(
         switch (input.Kind)
         {
             case PreviewInputKind.MouseDown:
-                await HandleMouseDownAsync(window, input.MouseButton, point).ConfigureAwait(false);
+                _mouseLast = point;
+                HandleMouseDown(window, input.MouseButton, point);
                 break;
             case PreviewInputKind.MouseMove:
-                HandleMouseMove(window, point);
+                if (_leftDown || _rightDown)
+                {
+                    _mouseLast = point;
+                    HandleMouseMove(window, point);
+                }
+
                 break;
             case PreviewInputKind.MouseUp:
-                await HandleMouseUpAsync(
-                        window,
-                        serial,
-                        input.MouseButton,
-                        point,
-                        context,
-                        cancellationToken)
-                    .ConfigureAwait(false);
+                HandleMouseUp(window, input.MouseButton, point);
+                _mouseLast = null;
                 break;
             case PreviewInputKind.TouchDown:
-                _touchStart = point;
+                if (_touchLast is not null)
+                {
+                    break;
+                }
+
                 _touchLast = point;
-                _touchStartedAt = DateTimeOffset.UtcNow;
+                HandleMouseDown(window, MouseButton.Left, point);
                 break;
             case PreviewInputKind.TouchMove:
-                if (_touchStart is not null)
+                if (_touchLast is not null)
                 {
                     _touchLast = point;
+                    HandleMouseMove(window, point);
                 }
 
                 break;
             case PreviewInputKind.TouchUp:
-                await FinishTouchAsync(serial, point, context, cancellationToken).ConfigureAwait(false);
+                HandleMouseUp(window, MouseButton.Left, point);
+                _touchLast = null;
                 break;
             case PreviewInputKind.MouseWheel:
                 _ = _directInput.ForwardPointer(
@@ -125,48 +146,15 @@ public sealed class PreviewInputCoordinator(
         }
     }
 
-    private async Task FinishTouchAsync(
-        string? serial,
-        MappedPoint? end,
-        CoordinateMappingContext context,
-        CancellationToken cancellationToken)
+    private void HandleMouseDown(nint window, MouseButton? button, MappedPoint point)
     {
-        MappedPoint? start = _touchStart;
-        _touchStart = null;
-        _touchLast = null;
-        if (string.IsNullOrWhiteSpace(serial) || start is null || end is null)
+        MouseButton effectiveButton = button ?? MouseButton.Left;
+        if ((effectiveButton == MouseButton.Left && _leftDown) ||
+            (effectiveButton == MouseButton.Right && _rightDown))
         {
             return;
         }
 
-        MappedPoint adbStart = ScaleForAdb(start.Value, context);
-        MappedPoint adbEnd = ScaleForAdb(end.Value, context);
-        double distance = Math.Sqrt(
-            Math.Pow(end.Value.X - start.Value.X, 2) +
-            Math.Pow(end.Value.Y - start.Value.Y, 2));
-        if (distance < 5)
-        {
-            await _adbInput.TapAsync(serial, adbEnd.X, adbEnd.Y, cancellationToken).ConfigureAwait(false);
-            return;
-        }
-
-        double durationMilliseconds = Math.Clamp(
-            (DateTimeOffset.UtcNow - _touchStartedAt).TotalMilliseconds,
-            0,
-            TimeSpan.FromMinutes(1).TotalMilliseconds);
-        TimeSpan duration = TimeSpan.FromMilliseconds(durationMilliseconds);
-        await _adbInput.SwipeAsync(
-            serial,
-            adbStart.X,
-            adbStart.Y,
-            adbEnd.X,
-            adbEnd.Y,
-            duration,
-            cancellationToken).ConfigureAwait(false);
-    }
-
-    private Task HandleMouseDownAsync(nint window, MouseButton? button, MappedPoint point)
-    {
         PointerAction action = button switch
         {
             MouseButton.Left => PointerAction.LeftButtonDown,
@@ -178,20 +166,17 @@ public sealed class PreviewInputCoordinator(
         if (button == MouseButton.Left)
         {
             _leftDown = true;
-            _dragStart = point;
-            _dragStartedAt = DateTimeOffset.UtcNow;
-            _directFailed = false;
         }
         else if (button == MouseButton.Right)
         {
             _rightDown = true;
         }
 
-        bool direct = _directInput.ForwardPointer(
+        _lastMoveForwardedTimestamp = 0;
+
+        _ = _directInput.ForwardPointer(
             window,
             new PointerInput(action, point, CurrentButtons(), CurrentModifiers()));
-        _directFailed |= !direct;
-        return Task.CompletedTask;
     }
 
     private void HandleMouseMove(nint window, MappedPoint point)
@@ -201,20 +186,32 @@ public sealed class PreviewInputCoordinator(
             return;
         }
 
-        bool direct = _directInput.ForwardPointer(
+        long timestamp = Stopwatch.GetTimestamp();
+        if (_lastMoveForwardedTimestamp != 0 &&
+            timestamp - _lastMoveForwardedTimestamp < MinimumMoveIntervalTicks)
+        {
+            return;
+        }
+
+        _lastMoveForwardedTimestamp = timestamp;
+
+        _ = _directInput.ForwardPointer(
             window,
             new PointerInput(PointerAction.Move, point, CurrentButtons(), CurrentModifiers()));
-        _directFailed |= !direct;
     }
 
-    private async Task HandleMouseUpAsync(
+    private void HandleMouseUp(
         nint window,
-        string? serial,
         MouseButton? button,
-        MappedPoint point,
-        CoordinateMappingContext context,
-        CancellationToken cancellationToken)
+        MappedPoint point)
     {
+        MouseButton effectiveButton = button ?? MouseButton.Left;
+        if ((effectiveButton == MouseButton.Left && !_leftDown) ||
+            (effectiveButton == MouseButton.Right && !_rightDown))
+        {
+            return;
+        }
+
         PointerAction action = button switch
         {
             MouseButton.Left => PointerAction.LeftButtonUp,
@@ -222,50 +219,21 @@ public sealed class PreviewInputCoordinator(
             MouseButton.Middle => PointerAction.MiddleButtonUp,
             _ => PointerAction.LeftButtonUp,
         };
-        bool direct = _directInput.ForwardPointer(
+        _ = _directInput.ForwardPointer(
             window,
             new PointerInput(action, point, CurrentButtons(), CurrentModifiers()));
-        _directFailed |= !direct;
 
         if (button == MouseButton.Left)
         {
             _leftDown = false;
-            if (_directFailed && _dragStart is { } start)
-            {
-                MappedPoint adbStart = ScaleForAdb(start, context);
-                MappedPoint adbEnd = ScaleForAdb(point, context);
-                double distance = Math.Sqrt(
-                    Math.Pow(point.X - start.X, 2) +
-                    Math.Pow(point.Y - start.Y, 2));
-                if (!string.IsNullOrWhiteSpace(serial) && distance < 5)
-                {
-                    await _adbInput
-                        .TapAsync(serial, adbEnd.X, adbEnd.Y, cancellationToken)
-                        .ConfigureAwait(false);
-                }
-                else if (!string.IsNullOrWhiteSpace(serial))
-                {
-                    TimeSpan duration = DateTimeOffset.UtcNow - _dragStartedAt;
-                    await _adbInput
-                        .SwipeAsync(
-                            serial,
-                            adbStart.X,
-                            adbStart.Y,
-                            adbEnd.X,
-                            adbEnd.Y,
-                            duration,
-                            cancellationToken)
-                        .ConfigureAwait(false);
-                }
-            }
-
-            _dragStart = null;
-            _directFailed = false;
         }
         else if (button == MouseButton.Right)
         {
             _rightDown = false;
         }
+
+
+        _lastMoveForwardedTimestamp = 0;
     }
 
     private async Task HandleKeyAsync(
@@ -368,30 +336,4 @@ public sealed class PreviewInputCoordinator(
         return modifiers;
     }
 
-    private MappedPoint ScaleForAdb(MappedPoint clientPoint, CoordinateMappingContext context)
-    {
-        PhoneStatus? status = _deviceMonitor.LastSnapshot?.PhoneStatus;
-        ScreenResolution? resolution = status?.ScreenResolution;
-        if (resolution is null)
-        {
-            return clientPoint;
-        }
-
-        bool streamIsLandscape = context.ScrcpyClientSizePixels.Width >= context.ScrcpyClientSizePixels.Height;
-        bool resolutionIsLandscape = resolution.Value.Width >= resolution.Value.Height;
-        if (streamIsLandscape != resolutionIsLandscape)
-        {
-            resolution = new ScreenResolution(resolution.Value.Height, resolution.Value.Width);
-        }
-
-        double sourceWidth = Math.Max(1, context.ScrcpyClientSizePixels.Width - 1);
-        double sourceHeight = Math.Max(1, context.ScrcpyClientSizePixels.Height - 1);
-        int x = (int)Math.Round(
-            Math.Clamp(clientPoint.X / sourceWidth, 0, 1) *
-            Math.Max(0, resolution.Value.Width - 1));
-        int y = (int)Math.Round(
-            Math.Clamp(clientPoint.Y / sourceHeight, 0, 1) *
-            Math.Max(0, resolution.Value.Height - 1));
-        return new MappedPoint(x, y);
-    }
 }

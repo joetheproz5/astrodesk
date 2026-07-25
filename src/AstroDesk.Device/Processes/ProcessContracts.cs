@@ -15,7 +15,23 @@ public sealed record ProcessInvocation(
     IReadOnlyDictionary<string, string?>? EnvironmentVariables = null,
     IReadOnlyCollection<string>? SensitiveValues = null,
     bool CreateNoWindow = true,
-    Action<ProcessOutputLine>? OutputReceived = null);
+    Action<ProcessOutputLine>? OutputReceived = null,
+    TimeSpan? Timeout = null);
+
+/// <summary>
+/// Thrown when a tool ran past its allotted time and was killed.
+/// </summary>
+/// <remarks>
+/// Distinct from cancellation so callers can tell "the user gave up" apart from
+/// "the tool wedged", and report the second usefully.
+/// </remarks>
+public sealed class ToolProcessTimeoutException(string fileName, TimeSpan timeout)
+    : Exception($"'{Path.GetFileName(fileName)}' did not finish within {timeout.TotalSeconds:0.#} seconds and was stopped.")
+{
+    public string FileName { get; } = fileName;
+
+    public TimeSpan Timeout { get; } = timeout;
+}
 
 public sealed record ProcessExecutionResult(
     int ExitCode,

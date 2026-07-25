@@ -3,7 +3,9 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Media;
+using System.Net;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -15,6 +17,7 @@ using AstroDesk.Capture.Histogram;
 using AstroDesk.Core.Calculations;
 using AstroDesk.Core.Entities;
 using AstroDesk.Core.Enums;
+using AstroDesk.Stacking;
 using AstroDesk.Core.Interfaces;
 using AstroDesk.Core.Models;
 using AstroDesk.Device;
@@ -49,7 +52,14 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private readonly AstroDeskAppOptions _appOptions;
     private readonly AppPaths _paths;
     private readonly ISessionAssetService _sessionAssets;
+    private readonly IPhonePhotoSyncService _photoSync;
     private readonly INightModeService _nightMode;
+    private readonly IStackSessionService _stackSession;
+    private readonly IStackEngine _stackEngine;
+    private readonly IAutoCaptureService _autoCapture;
+    private readonly ICameraForegroundService _cameraForeground;
+    private readonly ILivePreviewStackCoordinator _livePreview;
+    private readonly ILivePreviewRenderer _livePreviewRenderer;
     private readonly ILogger<MainWindowViewModel> _logger;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private readonly DispatcherTimer _elapsedTimer;
@@ -65,9 +75,17 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private bool _selectingLocation;
     private bool _suppressLocationRefresh;
     private long _conditionsRequestVersion;
+    private string? _pendingConditionsStatus;
     private PreviewFrameSnapshot? _pendingPreviewFrame;
+
+    /// <summary>
+    /// How the phone was attached when it last worked, so a drop can be
+    /// explained after the serial that would have told us is already gone.
+    /// </summary>
+    private DeviceTransport _lastKnownTransport = DeviceTransport.Unknown;
     private int _previewDispatchScheduled;
     private CancellationTokenSource? _wirelessQrCancellation;
+    private int _disposed;
 
     public MainWindowViewModel(
         IServiceScopeFactory scopeFactory,
@@ -86,7 +104,14 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         AstroDeskAppOptions appOptions,
         AppPaths paths,
         ISessionAssetService sessionAssets,
+        IPhonePhotoSyncService photoSync,
         INightModeService nightMode,
+        IStackSessionService stackSession,
+        IStackEngine stackEngine,
+        IAutoCaptureService autoCapture,
+        ICameraForegroundService cameraForeground,
+        ILivePreviewStackCoordinator livePreview,
+        ILivePreviewRenderer livePreviewRenderer,
         ILogger<MainWindowViewModel> logger)
     {
         _scopeFactory = scopeFactory;
@@ -105,7 +130,25 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _appOptions = appOptions;
         _paths = paths;
         _sessionAssets = sessionAssets;
+        _photoSync = photoSync;
         _nightMode = nightMode;
+        _stackSession = stackSession;
+        _stackEngine = stackEngine;
+        _autoCapture = autoCapture;
+        _cameraForeground = cameraForeground;
+        _livePreview = livePreview;
+        _livePreviewRenderer = livePreviewRenderer;
+        _stackSession.FrameAdded += HandleStackFrameAdded;
+        _stackSession.DarkFrameAdded += HandleStackDarkFrameAdded;
+        _livePreview.Updated += HandleLivePreviewUpdated;
+        _autoCapture.Triggered += HandleAutoCaptureTriggered;
+        _autoCapture.Finished += HandleAutoCaptureFinished;
+        _autoCapture.TelemetryChanged += HandleAutoCaptureTelemetry;
+
+        // Surface whatever the engine resolved (bundled copy or environment
+        // override) so the Settings field reflects reality instead of looking
+        // unconfigured while stacking actually works.
+        SirilPath = stackEngine.ExecutablePath;
         _logger = logger;
 
         ExposureSeconds = _appOptions.DefaultExposureSeconds;
@@ -125,6 +168,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         AdbPath = _deviceToolOptions.AdbExecutablePath ?? string.Empty;
         ScrcpyPath = _deviceToolOptions.ScrcpyExecutablePath ?? string.Empty;
         ScreenshotFolder = _paths.ScreenshotRoot;
+        PhoneCaptureFolder = _paths.PhoneCaptureRoot;
         SessionDataFolder = _paths.SessionRoot;
 
         _elapsedTimer = new DispatcherTimer(DispatcherPriority.Background)
@@ -258,6 +302,15 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     [ObservableProperty]
     private Size _scrcpyClientSize;
+
+    [ObservableProperty]
+    private nint _scrcpyWindowHandle;
+
+    public nint MainScrcpyWindowHandle =>
+        IsPreviewFullscreen || ShowWirelessPanel ? nint.Zero : ScrcpyWindowHandle;
+
+    public nint FullscreenScrcpyWindowHandle =>
+        IsPreviewFullscreen ? ScrcpyWindowHandle : nint.Zero;
 
     [ObservableProperty]
     private FrameRotation _previewRotation = FrameRotation.Rotate0;
@@ -613,6 +666,48 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     [ObservableProperty]
     private int _scrcpyMaxFps = 60;
 
+    /// <summary>
+    /// Raises the stream quality above the saved settings when the phone is on
+    /// USB.
+    /// </summary>
+    /// <remarks>
+    /// Off by default. It was on, and on a real S23 Ultra the extra traffic
+    /// reset the USB link within seconds of any on-screen movement, taking the
+    /// scrcpy server down with it. A preview that dies whenever it is touched is
+    /// far worse than one that is slightly softer, so the sharper stream has to
+    /// be asked for rather than assumed.
+    /// </remarks>
+    [ObservableProperty]
+    private bool _boostQualityOnCable;
+
+    // ------------------------------------------------------------ shooting zone
+
+    public const string ShootingZoneFullScreen = "Full screen";
+    public const string ShootingZoneExpertRaw = "Expert RAW (4:3)";
+
+    public IReadOnlyList<string> ShootingZoneOptions { get; } =
+        [ShootingZoneFullScreen, ShootingZoneExpertRaw];
+
+    /// <summary>
+    /// Which camera layout the framing guides should be drawn inside.
+    /// </summary>
+    /// <remarks>
+    /// Guides across the whole mirrored screen land inside the camera app's own
+    /// control panel rather than on the frame, so composing to them puts the
+    /// subject in the wrong place in the photograph.
+    /// </remarks>
+    [ObservableProperty]
+    private string _selectedShootingZone = ShootingZoneFullScreen;
+
+    public ShootingZone ShootingZone => SelectedShootingZone switch
+    {
+        ShootingZoneExpertRaw => Capture.Geometry.ShootingZone.ExpertRaw43,
+        _ => Capture.Geometry.ShootingZone.FullScreen,
+    };
+
+    partial void OnSelectedShootingZoneChanged(string value) =>
+        OnPropertyChanged(nameof(ShootingZone));
+
     [ObservableProperty]
     private int _statusRefreshSeconds = 20;
 
@@ -630,6 +725,12 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     [ObservableProperty]
     private string _screenshotFolder = string.Empty;
+
+    [ObservableProperty]
+    private string _phoneCaptureFolder = string.Empty;
+
+    [ObservableProperty]
+    private bool _automaticallyImportPhonePhotos = true;
 
     [ObservableProperty]
     private string _sessionDataFolder = string.Empty;
@@ -653,13 +754,365 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private NightDisplayMode _selectedNightMode = NightDisplayMode.NormalDark;
 
     [ObservableProperty]
+    private string _selectedWindowMode = "Windowed fullscreen";
+
+    [ObservableProperty]
     private string _settingsStatusText = "Settings are stored locally.";
+
+    public IReadOnlyList<string> WindowModeOptions { get; } =
+    [
+        "Windowed",
+        "Borderless window",
+        "Windowed fullscreen",
+        "Fullscreen",
+    ];
 
     public bool IsDashboard => CurrentPage == "Dashboard";
 
     public bool IsHistory => CurrentPage == "History";
 
     public bool IsSettings => CurrentPage == "Settings";
+
+    public bool IsStacking => CurrentPage == "Stacking";
+
+    public bool IsSky => CurrentPage == "Sky";
+
+    public bool IsPlan => CurrentPage == "Plan";
+
+    public bool IsLibrary => CurrentPage == "Library";
+
+    // ----------------------------------------------------------- header chips
+
+    /// <summary>
+    /// Battery, free space and phone temperature, kept in the header.
+    /// </summary>
+    /// <remarks>
+    /// All three were already polled and then discarded by the UI. Each one ends
+    /// a session on its own - a flat phone, a full disk, or a sensor hot enough
+    /// that the frames are noise - and none of them was visible without opening
+    /// a panel, which is not something anyone does at three in the morning.
+    /// </remarks>
+    [ObservableProperty]
+    private string _batteryChipText = "—";
+
+    [ObservableProperty]
+    private string _storageChipText = "—";
+
+    [ObservableProperty]
+    private string _phoneTemperatureChipText = "—";
+
+    [ObservableProperty]
+    private bool _hasPhoneVitals;
+
+    /// <summary>
+    /// Below this the phone may not survive the rest of a long run.
+    /// </summary>
+    private const int LowBatteryPercent = 30;
+
+    /// <summary>
+    /// Roughly one full session of raw frames at about 28 MB each.
+    /// </summary>
+    private const long LowStorageBytes = 4L * 1024 * 1024 * 1024;
+
+    /// <summary>
+    /// Above this thermal noise starts showing in stacked results, which is the
+    /// whole reason the cable profile stayed at 60 fps.
+    /// </summary>
+    private const decimal HotPhoneCelsius = 40;
+
+    [ObservableProperty]
+    private bool _isBatteryLow;
+
+    [ObservableProperty]
+    private bool _isStorageLow;
+
+    [ObservableProperty]
+    private bool _isPhoneHot;
+
+    private void UpdateHeaderChips(PhoneStatus? status)
+    {
+        HasPhoneVitals = status is not null;
+
+        BatteryChipText = status?.BatteryPercentage is { } battery ? $"{battery}%" : "—";
+        IsBatteryLow = status?.BatteryPercentage is { } level &&
+                       level < LowBatteryPercent &&
+                       status.ChargingState != ChargingState.Charging;
+
+        if (status?.InternalStorage is { } storage)
+        {
+            StorageChipText = FormatBytes(storage.FreeBytes);
+            IsStorageLow = storage.FreeBytes < LowStorageBytes;
+        }
+        else
+        {
+            StorageChipText = "—";
+            IsStorageLow = false;
+        }
+
+        decimal? phoneTemperature = status?.EstimatedPhoneTemperatureCelsius
+                                    ?? status?.BatteryTemperatureCelsius;
+        PhoneTemperatureChipText = phoneTemperature is null
+            ? "—"
+            : $"{phoneTemperature.Value:0} °C";
+        IsPhoneHot = phoneTemperature >= HotPhoneCelsius;
+    }
+
+    // ---------------------------------------------------------------- library
+
+    public ObservableCollection<CaptureRunSummary> LibraryRuns { get; } = [];
+
+    [ObservableProperty]
+    private string _librarySummary = "Nothing captured yet.";
+
+    [RelayCommand]
+    private void RefreshLibrary()
+    {
+        LibraryRuns.Clear();
+
+        IReadOnlyList<CaptureRunSummary> runs = CaptureLibrary.Scan(PhoneCaptureFolder);
+        foreach (CaptureRunSummary run in runs)
+        {
+            LibraryRuns.Add(run);
+        }
+
+        long total = CaptureLibrary.TotalBytes(runs);
+        int frames = runs.Sum(run => run.FrameCount);
+        LibrarySummary = runs.Count == 0
+            ? $"Nothing captured yet in {PhoneCaptureFolder}."
+            : $"{runs.Count} run(s) · {frames} frame(s) · {CaptureLibrary.FormatSize(total)} in {PhoneCaptureFolder}";
+    }
+
+    /// <summary>
+    /// The run's dark frames, if it has any.
+    /// </summary>
+    /// <remarks>
+    /// Detected rather than configured: a folder named "darks" beside the light
+    /// frames is where they land, and finding it automatically means an existing
+    /// run gains calibration simply by having darks dropped into it. An empty
+    /// folder is ignored, because handing Siril a darks directory with nothing in
+    /// it fails the whole run at the calibration step rather than skipping it.
+    /// </remarks>
+    private static string? FindDarksFolder(string sessionFolder)
+    {
+        if (string.IsNullOrWhiteSpace(sessionFolder))
+        {
+            return null;
+        }
+
+        string darks = Path.Combine(sessionFolder, SirilScriptBuilder.DarksFolderName);
+        if (!Directory.Exists(darks))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Directory.EnumerateFiles(darks).Any() ? darks : null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Asks the view for a yes/no answer.
+    /// </summary>
+    /// <remarks>
+    /// Returns false when nothing is listening, so a host without a UI cannot
+    /// silently approve a deletion by default.
+    /// </remarks>
+    private async Task<bool> RequestConfirmationAsync(string title, string message)
+    {
+        if (ConfirmationRequested is null)
+        {
+            return false;
+        }
+
+        ConfirmationRequestEventArgs request = new(title, message);
+        ConfirmationRequested.Invoke(this, request);
+        return await request.Completion.ConfigureAwait(true);
+    }
+
+    [RelayCommand]
+    private void OpenRunFolder(CaptureRunSummary? run)
+    {
+        if (run is null || !Directory.Exists(run.FolderPath))
+        {
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo(run.FolderPath) { UseShellExecute = true });
+    }
+
+    /// <summary>
+    /// Deletes a run's folder after confirming it.
+    /// </summary>
+    /// <remarks>
+    /// Always asks, and names the size being freed, because this is the one
+    /// action in the app that destroys captures rather than producing them.
+    /// The loose-captures entry is refused outright: its folder is the capture
+    /// root, so deleting it would take every original with it.
+    /// </remarks>
+    [RelayCommand]
+    private async Task DeleteRunAsync(CaptureRunSummary? run)
+    {
+        if (run is null)
+        {
+            return;
+        }
+
+        if (run.IsLooseCaptures)
+        {
+            StatusMessage =
+                "Loose captures sit in the capture folder itself, so they are not deleted from here. " +
+                "Remove individual files in Explorer instead.";
+            return;
+        }
+
+        // A path outside the capture folder means something is wrong with the
+        // listing, not with the user. Refusing beats asking the shell to delete
+        // whatever it was pointed at.
+        if (!RecycleBin.IsSafeToDelete(run.FolderPath, PhoneCaptureFolder))
+        {
+            _logger.LogWarning(
+                "Refused to delete {Folder}: it is not inside {Root}.",
+                run.FolderPath,
+                PhoneCaptureFolder);
+            StatusMessage = $"'{run.Name}' is not inside the capture folder, so it was not deleted.";
+            return;
+        }
+
+        bool confirmed = await RequestConfirmationAsync(
+            "Delete this capture run?",
+            $"'{run.Name}' holds {run.FrameCount} frame(s) and " +
+            $"{CaptureLibrary.FormatSize(run.TotalBytes)}.\n\n" +
+            "It will be sent to the Recycle Bin, so it can be restored from there.")
+            .ConfigureAwait(true);
+
+        if (!confirmed)
+        {
+            return;
+        }
+
+        try
+        {
+            if (RecycleBin.TrySendFolder(run.FolderPath))
+            {
+                StatusMessage =
+                    $"Sent {run.Name} to the Recycle Bin, freeing " +
+                    $"{CaptureLibrary.FormatSize(run.TotalBytes)}.";
+            }
+            else
+            {
+                StatusMessage = $"Windows would not move {run.Name} to the Recycle Bin.";
+            }
+
+            RefreshLibrary();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(exception, "Could not delete {Folder}.", run.FolderPath);
+            StatusMessage = $"Could not delete {run.Name}: {exception.Message}";
+        }
+    }
+
+    // ------------------------------------------------------------------- plan
+
+    /// <summary>
+    /// What is worth pointing at tonight, best first.
+    /// </summary>
+    public ObservableCollection<TargetPlanRow> TargetPlans { get; } = [];
+
+    [ObservableProperty]
+    private string _targetPlanSummary = "Waiting for tonight's twilight times.";
+
+    /// <summary>
+    /// Recomputes tonight's targets for the current site and dark window.
+    /// </summary>
+    /// <remarks>
+    /// Driven off the astronomy snapshot rather than a timer: the answer only
+    /// changes when the date, the site, or the twilight times change, and those
+    /// all arrive together.
+    /// </remarks>
+    private void RefreshTargetPlans()
+    {
+        TargetPlans.Clear();
+
+        DateTimeOffset? darkStart = _latestAstronomy?.DarkSkyWindowStart ?? _latestAstronomy?.Sunset;
+        DateTimeOffset? darkEnd = _latestAstronomy?.DarkSkyWindowEnd ?? _latestAstronomy?.Sunrise;
+
+        if (darkStart is null || darkEnd is null)
+        {
+            TargetPlanSummary = "Waiting for tonight's twilight times.";
+            return;
+        }
+
+        // A window that ends before it starts has run past midnight.
+        if (darkEnd <= darkStart)
+        {
+            darkEnd = darkEnd.Value.AddDays(1);
+        }
+
+        IReadOnlyList<TargetPlan> plans = TargetPlanner.PlanNight(
+            CelestialTargets.Reachable,
+            Latitude,
+            Longitude,
+            darkStart.Value,
+            darkEnd.Value);
+
+        foreach (TargetPlan plan in plans)
+        {
+            TargetPlans.Add(new TargetPlanRow(plan, FormatLocationTime));
+        }
+
+        int usable = plans.Count(plan => plan.IsUsable);
+        TargetPlanSummary = usable == 0
+            ? $"Nothing on the list clears {TargetPlanner.MinimumUsableAltitudeDegrees:0}° tonight."
+            : $"{usable} of {plans.Count} targets clear {TargetPlanner.MinimumUsableAltitudeDegrees:0}° " +
+              $"during tonight's dark window.";
+    }
+
+    /// <summary>
+    /// Points the session at a planned target.
+    /// </summary>
+    [RelayCommand]
+    private void UseTarget(TargetPlanRow? row)
+    {
+        if (row is null)
+        {
+            return;
+        }
+
+        TargetName = row.Name;
+        SelectedSessionType = row.SessionType;
+        CurrentPage = "Dashboard";
+        StatusMessage = row.IsUsable
+            ? $"Session set to {row.Name}. Best around {row.PeakText}."
+            : $"Session set to {row.Name}, which does not rise high enough tonight.";
+    }
+
+    /// <summary>
+    /// The light-pollution map, opened on the site currently being planned.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the live web map rather than something drawn from the atlas tiles
+    /// the app already downloads. Those tiles would give an offline map, but
+    /// choosing where to shoot is planning done at a desk rather than at the
+    /// tripod, and the site brings panning, search and overlays that would each
+    /// have to be rebuilt for no gain.
+    /// </para>
+    /// <para>
+    /// Zoom 9 is close enough to tell one valley from the next while still
+    /// showing where the nearest town's glow reaches.
+    /// </para>
+    /// </remarks>
+    public Uri SkyMapUri => new(
+        "https://www.lightpollutionmap.app/?" +
+        $"lat={Latitude.ToString("0.######", CultureInfo.InvariantCulture)}" +
+        $"&lng={Longitude.ToString("0.######", CultureInfo.InvariantCulture)}" +
+        "&zoom=9");
 
     public bool HasActiveSession => _activeSession is not null;
 
@@ -689,6 +1142,8 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             _preview.FrameReady += HandlePreviewFrame;
             _preview.HistogramReady += HandleHistogram;
             _preview.StatusChanged += HandlePreviewStatus;
+            _photoSync.PhotoImported += HandlePhonePhotoImported;
+            _preview.WindowHandleChanged += HandlePreviewWindowHandleChanged;
             _deviceMonitor.SnapshotChanged += HandleDeviceSnapshot;
             _exposureTimer.Tick += HandleTimerTick;
             subscribed = true;
@@ -737,6 +1192,11 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         _wirelessQrCancellation?.Cancel();
         _wirelessQrCancellation?.Dispose();
         _wirelessQrCancellation = null;
@@ -745,9 +1205,12 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _preview.FrameReady -= HandlePreviewFrame;
         _preview.HistogramReady -= HandleHistogram;
         _preview.StatusChanged -= HandlePreviewStatus;
+        _photoSync.PhotoImported -= HandlePhonePhotoImported;
+        _preview.WindowHandleChanged -= HandlePreviewWindowHandleChanged;
         _deviceMonitor.SnapshotChanged -= HandleDeviceSnapshot;
         _exposureTimer.Tick -= HandleTimerTick;
 
+        ScrcpyWindowHandle = nint.Zero;
         await _exposureTimer.StopAsync().ConfigureAwait(false);
         await _deviceMonitor.StopAsync().ConfigureAwait(false);
         await _preview.StopAsync().ConfigureAwait(false);
@@ -781,6 +1244,8 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     public void SetScreenshotFolder(string path) => ScreenshotFolder = path;
 
+    public void SetPhoneCaptureFolder(string path) => PhoneCaptureFolder = path;
+
     public void SetSessionDataFolder(string path) => SessionDataFolder = path;
 
     [RelayCommand]
@@ -791,6 +1256,31 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     [RelayCommand]
     private void ShowSettings() => CurrentPage = "Settings";
+
+    [RelayCommand]
+    private void ShowStacking() => CurrentPage = "Stacking";
+
+    [RelayCommand]
+    private void ShowSky() => CurrentPage = "Sky";
+
+    [RelayCommand]
+    private void ShowPlan() => CurrentPage = "Plan";
+
+    [RelayCommand]
+    private void ShowLibrary()
+    {
+        CurrentPage = "Library";
+
+        // Scanned on entry rather than kept live: captures arrive throughout a
+        // session, and a listing that is only read when looked at cannot go stale.
+        RefreshLibrary();
+    }
+
+    /// <summary>
+    /// Re-centres the map on the site currently being planned.
+    /// </summary>
+    [RelayCommand]
+    private void RecentreSkyMap() => OnPropertyChanged(nameof(SkyMapUri));
 
     [RelayCommand]
     private async Task StartPreviewAsync()
@@ -808,20 +1298,30 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 return;
             }
 
+            if (monitor?.Connection.IsConnected != true)
+            {
+                // The cached snapshot can be a poll behind. That is how this
+                // managed to report no device while the status bar still showed
+                // the phone connected, which reads as the app contradicting
+                // itself. Ask once more before refusing.
+                await _deviceMonitor.PollOnceAsync(_lifetimeCancellation.Token).ConfigureAwait(true);
+                monitor = _deviceMonitor.LastSnapshot;
+            }
+
+            if (monitor?.Connection.IsConnected != true)
+            {
+                ReportNoDeviceForPreview();
+                return;
+            }
+
             string? serial = monitor?.Connection.SelectedDevice?.Serial
                              ?? SelectedAdbDevice?.Serial;
+            _lastKnownTransport = DeviceTransportDetector.Detect(serial);
             ScrcpySession session = await _preview.StartAsync(
-                new ScrcpyLaunchOptions
-                {
-                    ExecutablePath = string.IsNullOrWhiteSpace(ScrcpyPath) ? null : ScrcpyPath,
-                    DeviceSerial = serial,
-                    VideoBitRateMbps = Math.Clamp(ScrcpyBitrateMbps, 1, 100),
-                    MaxSize = ScrcpyMaxResolution > 0 ? ScrcpyMaxResolution : null,
-                    MaxFps = ScrcpyMaxFps > 0 ? ScrcpyMaxFps : null,
-                    KeepAwake = true,
-                },
+                BuildLaunchOptions(serial),
                 _lifetimeCancellation.Token).ConfigureAwait(true);
-            StatusMessage = $"scrcpy started ({session.WindowTitle}).";
+            ScrcpyWindowHandle = session.WindowHandle;
+            StatusMessage = DescribeStartedSession(session, serial);
         }
         catch (Exception exception)
         {
@@ -832,11 +1332,116 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Explains a missing device in terms of how it was actually attached.
+    /// </summary>
+    /// <remarks>
+    /// This used to open the wireless panel and say "finish the wireless
+    /// connection first" whatever the phone was plugged into. On a cable that is
+    /// simply wrong, and it is worst exactly when it is least welcome: a USB link
+    /// that resets mid-session sends the user to a pairing screen that cannot
+    /// help, while the status bar still shows the phone as connected.
+    /// </remarks>
+    private void ReportNoDeviceForPreview()
+    {
+        string? serial = _deviceMonitor.LastSnapshot?.Connection.SelectedDevice?.Serial
+                         ?? SelectedAdbDevice?.Serial;
+
+        // A dropped device leaves no serial to read, so fall back to how it was
+        // attached when it was last working.
+        DeviceTransport transport = DeviceTransportDetector.Detect(serial);
+        if (transport == DeviceTransport.Unknown)
+        {
+            transport = _lastKnownTransport;
+        }
+
+        switch (transport)
+        {
+            case DeviceTransport.Cable:
+                StatusMessage =
+                    "The phone stopped responding over USB. Check the cable and port, " +
+                    "then press Start preview again.";
+                return;
+
+            case DeviceTransport.Wireless:
+                ShowWirelessPanel = true;
+                WirelessStatus =
+                    "The wireless connection has dropped. On the phone's Wireless debugging " +
+                    "screen, copy its IP address and port into Connect directly, then press Connect.";
+                StatusMessage = "The wireless ADB connection has dropped. Reconnect it, then start the preview.";
+                return;
+
+            default:
+                // Nothing has ever connected in this session, so neither route is
+                // more likely than the other; offering both beats guessing.
+                StatusMessage =
+                    "No phone is connected. Plug it in with a USB cable, " +
+                    "or use Wireless to pair over Wi-Fi.";
+                return;
+        }
+    }
+
+    /// <summary>
+    /// Builds the scrcpy options, lifting the stream quality when the phone is on
+    /// a cable.
+    /// </summary>
+    /// <remarks>
+    /// The saved settings are the floor, never the ceiling: the cable profile can
+    /// only raise a value, so a deliberately higher setting is preserved and a
+    /// deliberately lower one is still honoured by turning the boost off. Without
+    /// that, opening Settings once would silently pin the cable back down to
+    /// whatever Wi-Fi could survive.
+    /// </remarks>
+    internal ScrcpyLaunchOptions BuildLaunchOptions(string? serial)
+    {
+        int maxSize = ScrcpyMaxResolution;
+        int maxFps = ScrcpyMaxFps;
+        int bitrate = ScrcpyBitrateMbps;
+
+        if (BoostQualityOnCable &&
+            DeviceTransportDetector.Detect(serial) == DeviceTransport.Cable)
+        {
+            ScrcpyQualityProfile profile = ScrcpyQualityProfile.Cable;
+            maxSize = Math.Max(maxSize, profile.MaxSize);
+            maxFps = Math.Max(maxFps, profile.MaxFps);
+            bitrate = Math.Max(bitrate, profile.VideoBitRateMbps);
+        }
+
+        return new ScrcpyLaunchOptions
+        {
+            ExecutablePath = string.IsNullOrWhiteSpace(ScrcpyPath) ? null : ScrcpyPath,
+            DeviceSerial = serial,
+            VideoBitRateMbps = Math.Clamp(bitrate, 1, 100),
+            MaxSize = maxSize > 0 ? maxSize : null,
+            MaxFps = maxFps > 0 ? maxFps : null,
+            KeepAwake = true,
+        };
+    }
+
+    /// <summary>
+    /// Reports the quality actually in use, so a boosted cable session is not a
+    /// silent difference from what Settings shows.
+    /// </summary>
+    private string DescribeStartedSession(ScrcpySession session, string? serial)
+    {
+        string link = DeviceTransportDetector.Detect(serial) switch
+        {
+            DeviceTransport.Cable => "cable",
+            DeviceTransport.Wireless => "wireless",
+            _ => "unknown link",
+        };
+
+        return $"scrcpy started over {link} at {session.Options.MaxSize?.ToString() ?? "native"}p, " +
+               $"{session.Options.MaxFps?.ToString() ?? "unlimited"} fps, " +
+               $"{session.Options.VideoBitRateMbps} Mbps.";
+    }
+
     [RelayCommand]
     private async Task StopPreviewAsync()
     {
         try
         {
+            ScrcpyWindowHandle = nint.Zero;
             await _preview.StopAsync(_lifetimeCancellation.Token).ConfigureAwait(true);
             PreviewImage = null;
             PreviewError = null;
@@ -854,7 +1459,11 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         try
         {
             PreviewError = null;
-            _ = await _preview.ReconnectAsync(_lifetimeCancellation.Token).ConfigureAwait(true);
+            ScrcpyWindowHandle = nint.Zero;
+            ScrcpySession session = await _preview
+                .ReconnectAsync(_lifetimeCancellation.Token)
+                .ConfigureAwait(true);
+            ScrcpyWindowHandle = session.WindowHandle;
         }
         catch (Exception exception)
         {
@@ -970,39 +1579,24 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 throw new InvalidOperationException("Enter the six-digit pairing code shown on the phone.");
             }
 
-            IReadOnlyList<AdbMdnsService> discovered;
-            try
-            {
-                discovered = await _adbWireless.GetMdnsServicesAsync(
-                    _lifetimeCancellation.Token).ConfigureAwait(true);
-            }
-            catch (Exception exception)
-            {
-                _logger.LogDebug(exception, "Could not refresh the temporary pairing address; using the address entered by the user.");
-                discovered = [];
-            }
-            AdbMdnsService[] pairingServices = discovered
-                .Where(static service => service.ServiceType == "_adb-tls-pairing._tcp")
-                .Where(static service => service.InstanceName.StartsWith("adb-", StringComparison.Ordinal))
-                .ToArray();
-            if (pairingServices.Length == 1 && pairingServices[0].Endpoint != endpoint)
-            {
-                endpoint = pairingServices[0].Endpoint;
-                WirelessPairingEndpoint = endpoint;
-                WirelessStatus = $"Found the phone's current temporary pairing address: {endpoint}. Pairing…";
-            }
-            else
-            {
-                WirelessStatus = $"Pairing with {endpoint}…";
-            }
+            WirelessPairingEndpoint = endpoint;
+            WirelessStatus = $"Pairing with {endpoint}…";
 
             await _adbWireless.PairWirelessAsync(
                 endpoint,
                 code,
                 _lifetimeCancellation.Token).ConfigureAwait(true);
             WirelessPairingCode = string.Empty;
-            WirelessStatus = "Paired. Copy the separate IP address and port from the main Wireless debugging screen, then tap Connect.";
-            StatusMessage = "Wireless ADB pairing completed.";
+            WirelessStatus = "Paired. Looking for the phone's secure connection port…";
+            string? connectedEndpoint = await TryAutoConnectPairedPhoneAsync(
+                endpoint,
+                _lifetimeCancellation.Token).ConfigureAwait(true);
+            WirelessStatus = connectedEndpoint is null
+                ? "Pairing succeeded, but the phone is NOT connected yet. Return to the main Wireless debugging screen on the phone, copy its different IP address and port into Connect directly above, then press Connect."
+                : $"Paired and connected wirelessly to {connectedEndpoint}.";
+            StatusMessage = connectedEndpoint is null
+                ? "Wireless ADB pairing completed."
+                : "Wireless ADB paired and connected.";
         }
         catch (Exception exception)
         {
@@ -1026,6 +1620,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         IsWirelessBusy = true;
         try
         {
+            WirelessStatus = "Restarting ADB wireless discovery…";
+            await _adbWireless.RestartWirelessDiscoveryAsync(
+                _lifetimeCancellation.Token).ConfigureAwait(true);
             WirelessStatus = "Looking for the open pairing-code screen on this Wi-Fi…";
             IReadOnlyList<AdbMdnsService> services = await _adbWireless.GetMdnsServicesAsync(
                 _lifetimeCancellation.Token).ConfigureAwait(true);
@@ -1078,11 +1675,15 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         WirelessQrCodeImage = CreateQrCodeImage(payload);
         IsWirelessQrActive = true;
         IsWirelessBusy = true;
-        WirelessStatus = "On the S23, open Wireless debugging → Pair device with QR code, then scan this code.";
+        WirelessStatus = "Restarting ADB wireless discovery…";
 
         try
         {
+            await _adbWireless.RestartWirelessDiscoveryAsync(cancellation.Token).ConfigureAwait(true);
+            WirelessStatus = "On the S23, open Wireless debugging → Pair device with QR code, then scan this code.";
             DateTimeOffset deadline = DateTimeOffset.UtcNow.AddMinutes(2);
+            DateTimeOffset discoveryHintAt = DateTimeOffset.UtcNow.AddSeconds(12);
+            bool discoveryHintShown = false;
             while (DateTimeOffset.UtcNow < deadline)
             {
                 cancellation.Token.ThrowIfCancellationRequested();
@@ -1098,11 +1699,23 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                         pairingService.Endpoint,
                         password,
                         cancellation.Token).ConfigureAwait(true);
-                    await Task.Delay(TimeSpan.FromSeconds(1), cancellation.Token).ConfigureAwait(true);
-                    await _deviceMonitor.PollOnceAsync(cancellation.Token).ConfigureAwait(true);
-                    WirelessStatus = "QR pairing complete. The S23 should connect automatically; if it does not, use the Connect address shown on the main Wireless debugging screen.";
-                    StatusMessage = "Wireless ADB QR pairing completed.";
+                    WirelessStatus = "QR pairing complete. Looking for the secure connection port…";
+                    string? connectedEndpoint = await TryAutoConnectPairedPhoneAsync(
+                        pairingService.Endpoint,
+                        cancellation.Token).ConfigureAwait(true);
+                    WirelessStatus = connectedEndpoint is null
+                        ? "QR pairing succeeded, but the phone is NOT connected yet. Return to the main Wireless debugging screen on the phone, copy its different IP address and port into Connect directly above, then press Connect."
+                        : $"QR pairing complete. Connected wirelessly to {connectedEndpoint}.";
+                    StatusMessage = connectedEndpoint is null
+                        ? "Wireless ADB QR pairing completed."
+                        : "Wireless ADB QR pairing completed and connected.";
                     return;
+                }
+
+                if (!discoveryHintShown && DateTimeOffset.UtcNow >= discoveryHintAt)
+                {
+                    discoveryHintShown = true;
+                    WirelessStatus = "No QR pairing service has reached this laptop yet. If the phone is spinning, cancel QR and use the six-digit code; some Windows hotspots block QR discovery.";
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(1), cancellation.Token).ConfigureAwait(true);
@@ -1137,6 +1750,46 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
     private void CancelQrPairing()
     {
         _wirelessQrCancellation?.Cancel();
+    }
+
+    private async Task<string?> TryAutoConnectPairedPhoneAsync(
+        string pairingEndpoint,
+        CancellationToken cancellationToken)
+    {
+        int separator = pairingEndpoint.LastIndexOf(':');
+        string address = separator > 0 ? pairingEndpoint[..separator] : pairingEndpoint;
+        for (int attempt = 0; attempt < 12; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                IReadOnlyList<AdbMdnsService> services = await _adbWireless.GetMdnsServicesAsync(
+                    cancellationToken).ConfigureAwait(true);
+                AdbMdnsService? connectService = services.FirstOrDefault(
+                    service => service.ServiceType == "_adb-tls-connect._tcp" &&
+                               service.Endpoint.StartsWith(
+                                   address + ":",
+                                   StringComparison.OrdinalIgnoreCase));
+                if (connectService is not null)
+                {
+                    await _adbWireless.ConnectWirelessAsync(
+                        connectService.Endpoint,
+                        cancellationToken).ConfigureAwait(true);
+                    WirelessEndpoint = connectService.Endpoint;
+                    await _deviceMonitor.PollOnceAsync(cancellationToken).ConfigureAwait(true);
+                    return connectService.Endpoint;
+                }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                _logger.LogDebug(exception, "Could not auto-connect immediately after wireless pairing.");
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(true);
+        }
+
+        await _deviceMonitor.PollOnceAsync(cancellationToken).ConfigureAwait(true);
+        return null;
     }
 
     [RelayCommand]
@@ -1190,9 +1843,6 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     [RelayCommand]
     private Task PowerAsync() => ExecuteToolbarAsync(DeviceToolbarAction.Power);
-
-    [RelayCommand]
-    private Task RotatePhoneAsync() => ExecuteToolbarAsync(DeviceToolbarAction.RotatePhone);
 
     [RelayCommand]
     private Task KeepPhoneAwakeAsync() => ExecuteToolbarAsync(DeviceToolbarAction.KeepAwake);
@@ -1680,6 +2330,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 _latestWeather,
                 _latestAstronomy,
                 EnableNetworkConditions);
+            ResolveConditionsLoadingStatus("Ready.");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -1687,8 +2338,38 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         catch (Exception exception)
         {
             _logger.LogWarning(exception, "Conditions refresh failed.");
+            _pendingConditionsStatus = null;
             StatusMessage = $"Conditions unavailable: {exception.Message}";
         }
+    }
+
+    /// <summary>
+    /// Shows a conditions-loading message and remembers it, so a later refresh can retire it.
+    /// </summary>
+    private void SetConditionsLoadingStatus(string message)
+    {
+        _pendingConditionsStatus = message;
+        StatusMessage = message;
+    }
+
+    /// <summary>
+    /// Retires a conditions-loading message once the load finishes. Anything the user has been
+    /// told since — a device drop, a session change, a capture failure — is left on screen,
+    /// because that is more useful than the fact that the weather arrived.
+    /// </summary>
+    private void ResolveConditionsLoadingStatus(string resolvedMessage)
+    {
+        if (_pendingConditionsStatus is null)
+        {
+            return;
+        }
+
+        if (string.Equals(StatusMessage, _pendingConditionsStatus, StringComparison.Ordinal))
+        {
+            StatusMessage = resolvedMessage;
+        }
+
+        _pendingConditionsStatus = null;
     }
 
     [RelayCommand]
@@ -1746,9 +2427,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             : "Using this laptop's current location";
         LocationCoordinateText = automaticLocation.CoordinateText;
         TimeZoneText = FormatTimeZoneLabel(automaticLocation.TimeZoneId);
-        StatusMessage = isIpEstimate
+        SetConditionsLoadingStatus(isIpEstimate
             ? "Windows location was unavailable. Loading live conditions from an approximate public-IP location."
-            : "Current location detected. Loading live conditions for this area.";
+            : "Current location detected. Loading live conditions for this area.");
 
         if (_initialized)
         {
@@ -1983,16 +2664,10 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
-        ConfirmationRequestEventArgs request = new(
-            "Delete shooting session",
-            $"Delete the session “{SelectedHistorySession.Target}”? The database record will be removed; exported files are left in place for recovery.");
-        if (ConfirmationRequested is null)
-        {
-            return;
-        }
-
-        ConfirmationRequested.Invoke(this, request);
-        if (!await request.Completion.ConfigureAwait(true))
+        if (!await RequestConfirmationAsync(
+                "Delete shooting session",
+                $"Delete the session “{SelectedHistorySession.Target}”? The database record will be removed; exported files are left in place for recovery.")
+            .ConfigureAwait(true))
         {
             return;
         }
@@ -2051,6 +2726,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         {
             ValidateSettings();
             _paths.SetScreenshotRoot(ScreenshotFolder);
+            _paths.SetPhoneCaptureRoot(PhoneCaptureFolder);
             _paths.SetSessionRoot(SessionDataFolder);
             await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
             ISettingsService settings = scope.ServiceProvider.GetRequiredService<ISettingsService>();
@@ -2059,12 +2735,16 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             await settings.SetAsync("Scrcpy.BitrateMbps", ScrcpyBitrateMbps, "Device", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Scrcpy.MaxResolution", ScrcpyMaxResolution, "Device", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Scrcpy.MaxFps", ScrcpyMaxFps, "Device", _lifetimeCancellation.Token).ConfigureAwait(true);
+            await settings.SetAsync("Scrcpy.BoostOnCable", BoostQualityOnCable, "Device", _lifetimeCancellation.Token).ConfigureAwait(true);
+            await settings.SetAsync("Overlay.ShootingZone", SelectedShootingZone, "Overlay", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Status.RefreshSeconds", StatusRefreshSeconds, "Status", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Weather.RefreshMinutes", WeatherRefreshMinutes, "Conditions", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Session.DefaultLocation", DefaultLocationName, "Session", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Session.DefaultExposureSeconds", DefaultExposureSeconds, "Session", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Session.DefaultFrameCount", DefaultFrameCount, "Session", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Files.ScreenshotFolder", ScreenshotFolder, "Files", _lifetimeCancellation.Token).ConfigureAwait(true);
+            await settings.SetAsync("Files.PhoneCaptureFolder", PhoneCaptureFolder, "Files", _lifetimeCancellation.Token).ConfigureAwait(true);
+            await settings.SetAsync("Files.AutoImportPhonePhotos", AutomaticallyImportPhonePhotos, "Files", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Files.SessionDataFolder", SessionDataFolder, "Files", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Startup.AutoLaunchScrcpy", AutomaticallyLaunchScrcpy, "Startup", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Startup.AutoReconnect", AutomaticallyReconnect, "Startup", _lifetimeCancellation.Token).ConfigureAwait(true);
@@ -2087,11 +2767,14 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             await settings.SetAsync("Overlay.RectangleHeightPercent", CustomRectangleHeightPercent, "Overlay", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Histogram.UpdateMilliseconds", HistogramUpdateMilliseconds, "Histogram", _lifetimeCancellation.Token).ConfigureAwait(true);
             await settings.SetAsync("Display.NightMode", SelectedNightMode, "Display", _lifetimeCancellation.Token).ConfigureAwait(true);
+            await settings.SetAsync("Display.WindowMode", SelectedWindowMode, "Display", _lifetimeCancellation.Token).ConfigureAwait(true);
 
             _deviceToolOptions.AdbExecutablePath = string.IsNullOrWhiteSpace(AdbPath) ? null : AdbPath;
             _deviceToolOptions.ScrcpyExecutablePath = string.IsNullOrWhiteSpace(ScrcpyPath) ? null : ScrcpyPath;
             _deviceMonitorOptions.RefreshInterval = TimeSpan.FromSeconds(StatusRefreshSeconds);
             _deviceMonitorOptions.AutoReconnect = AutomaticallyReconnect;
+            _photoSync.DestinationFolder = PhoneCaptureFolder;
+            _photoSync.Enabled = AutomaticallyImportPhonePhotos;
             SettingsStatusText =
                 "Settings saved locally. Device polling and asset folders are active immediately.";
         }
@@ -2107,6 +2790,10 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         OnPropertyChanged(nameof(IsDashboard));
         OnPropertyChanged(nameof(IsHistory));
         OnPropertyChanged(nameof(IsSettings));
+        OnPropertyChanged(nameof(IsStacking));
+        OnPropertyChanged(nameof(IsSky));
+        OnPropertyChanged(nameof(IsPlan));
+        OnPropertyChanged(nameof(IsLibrary));
     }
 
     partial void OnShowNightBriefDrawerChanged(bool value)
@@ -2127,6 +2814,8 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     partial void OnShowWirelessPanelChanged(bool value)
     {
+        OnPropertyChanged(nameof(MainScrcpyWindowHandle));
+
         if (!value)
         {
             _wirelessQrCancellation?.Cancel();
@@ -2135,12 +2824,21 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     partial void OnIsPreviewFullscreenChanged(bool value)
     {
+        OnPropertyChanged(nameof(MainScrcpyWindowHandle));
+        OnPropertyChanged(nameof(FullscreenScrcpyWindowHandle));
+
         if (value)
         {
             ShowNightBriefDrawer = false;
             ShowSessionDrawer = false;
             ShowWirelessPanel = false;
         }
+    }
+
+    partial void OnScrcpyWindowHandleChanged(nint value)
+    {
+        OnPropertyChanged(nameof(MainScrcpyWindowHandle));
+        OnPropertyChanged(nameof(FullscreenScrcpyWindowHandle));
     }
 
     partial void OnSelectedSessionTypeChanged(SessionType value) =>
@@ -2282,6 +2980,15 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         ScrcpyBitrateMbps = await settings.GetAsync("Scrcpy.BitrateMbps", ScrcpyBitrateMbps, cancellationToken);
         ScrcpyMaxResolution = await settings.GetAsync("Scrcpy.MaxResolution", ScrcpyMaxResolution, cancellationToken);
         ScrcpyMaxFps = await settings.GetAsync("Scrcpy.MaxFps", ScrcpyMaxFps, cancellationToken);
+        BoostQualityOnCable = await settings.GetAsync("Scrcpy.BoostOnCable", BoostQualityOnCable, cancellationToken);
+
+        // Guard the stored value: a preset that no longer exists must fall back to
+        // the whole screen rather than leaving the guides drawn nowhere.
+        string storedZone = await settings.GetAsync("Overlay.ShootingZone", SelectedShootingZone, cancellationToken)
+                            ?? ShootingZoneFullScreen;
+        SelectedShootingZone = ShootingZoneOptions.Contains(storedZone)
+            ? storedZone
+            : ShootingZoneFullScreen;
         StatusRefreshSeconds = await settings.GetAsync("Status.RefreshSeconds", StatusRefreshSeconds, cancellationToken);
         WeatherRefreshMinutes = await settings.GetAsync("Weather.RefreshMinutes", WeatherRefreshMinutes, cancellationToken);
         DefaultLocationName = await settings.GetAsync("Session.DefaultLocation", _appOptions.DefaultLocation, cancellationToken)
@@ -2290,6 +2997,12 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         DefaultFrameCount = await settings.GetAsync("Session.DefaultFrameCount", PlannedFrameCount, cancellationToken);
         ScreenshotFolder = await settings.GetAsync("Files.ScreenshotFolder", ScreenshotFolder, cancellationToken)
                            ?? ScreenshotFolder;
+        PhoneCaptureFolder = await settings.GetAsync("Files.PhoneCaptureFolder", PhoneCaptureFolder, cancellationToken)
+                             ?? PhoneCaptureFolder;
+        AutomaticallyImportPhonePhotos = await settings.GetAsync(
+            "Files.AutoImportPhonePhotos",
+            AutomaticallyImportPhonePhotos,
+            cancellationToken);
         SessionDataFolder = await settings.GetAsync("Files.SessionDataFolder", SessionDataFolder, cancellationToken)
                             ?? SessionDataFolder;
         AutomaticallyLaunchScrcpy = await settings.GetAsync("Startup.AutoLaunchScrcpy", AutomaticallyLaunchScrcpy, cancellationToken);
@@ -2326,6 +3039,13 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             HistogramUpdateMilliseconds,
             cancellationToken);
         SelectedNightMode = await settings.GetAsync("Display.NightMode", SelectedNightMode, cancellationToken);
+        string? savedWindowMode = await settings.GetAsync(
+            "Display.WindowMode",
+            SelectedWindowMode,
+            cancellationToken);
+        SelectedWindowMode = WindowModeOptions.Contains(savedWindowMode, StringComparer.Ordinal)
+            ? savedWindowMode!
+            : "Windowed fullscreen";
 
         ExposureSeconds = DefaultExposureSeconds;
         PlannedFrameCount = DefaultFrameCount;
@@ -2336,6 +3056,9 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         _deviceMonitorOptions.RefreshInterval = TimeSpan.FromSeconds(
             Math.Clamp(StatusRefreshSeconds, 5, 300));
         _deviceMonitorOptions.AutoReconnect = AutomaticallyReconnect;
+        _photoSync.DestinationFolder = PhoneCaptureFolder;
+        _photoSync.RemoteFolder = SelectedCameraApp.RemoteFolder;
+        _photoSync.Enabled = AutomaticallyImportPhonePhotos;
         try
         {
             _paths.SetScreenshotRoot(ScreenshotFolder);
@@ -2519,6 +3242,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 StorageText = status?.InternalStorage is { } storage
                     ? $"{FormatBytes(storage.FreeBytes)} free / {FormatBytes(storage.TotalBytes)}"
                     : "Unavailable";
+                UpdateHeaderChips(status);
                 ScreenResolutionText = status?.ScreenResolution is { } resolution
                     ? $"{resolution.Width} × {resolution.Height}"
                     : "Unavailable";
@@ -2571,6 +3295,45 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 PreviewError = status.Error;
             });
 
+    private void HandlePreviewWindowHandleChanged(object? sender, nint handle) =>
+        Dispatch(
+            () =>
+            {
+                // The embedded host must follow the new window; leaving it bound
+                // to the destroyed one shows a permanently black preview.
+                // MainScrcpyWindowHandle is computed from this, and its own
+                // change notification is raised by the generated setter.
+                ScrcpyWindowHandle = handle;
+                StatusMessage = "Phone preview reattached.";
+            });
+
+    private void HandlePhonePhotoImported(object? sender, PhonePhotoImportedEventArgs args)
+    {
+        // Offer every imported capture to the stack run. The service ignores it
+        // unless stack mode is armed and the target has not been met, so this is
+        // safe to call unconditionally and keeps the arming decision in one place.
+        _ = _stackSession.Offer(args.LocalPath, DateTimeOffset.Now);
+
+        // Advance the unattended run only if this file genuinely completes the
+        // outstanding shutter press. The file's own write time is used rather
+        // than "now", because the sync poll can lag several seconds behind.
+        DateTimeOffset writtenAt;
+        try
+        {
+            writtenAt = File.Exists(args.LocalPath)
+                ? new DateTimeOffset(File.GetLastWriteTimeUtc(args.LocalPath), TimeSpan.Zero)
+                : DateTimeOffset.Now;
+        }
+        catch (IOException)
+        {
+            writtenAt = DateTimeOffset.Now;
+        }
+
+        _ = _autoCapture.NotifyFileImported(args.LocalPath, writtenAt);
+
+        Dispatch(() => StatusMessage = $"Phone photo saved to {args.LocalPath}");
+    }
+
     private void HandleTimerTick(object? sender, ExposureTimerTick tick) =>
         Dispatch(
             () =>
@@ -2607,6 +3370,10 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
     private void UpdateConditionsDisplay()
     {
+        // Tonight's targets depend on the same twilight times and site as
+        // everything else here, so they are rebuilt on the same signal.
+        RefreshTargetPlans();
+
         WeatherConditions? weather = _latestWeather;
         TemperatureText = Format(weather?.TemperatureCelsius, "0.0", " °C");
         HumidityText = Format(weather?.HumidityPercent, "0", "%");
@@ -2680,6 +3447,24 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                 ? $"{FormatLocationTime(start)} – {FormatLocationTime(end)}"
                 : "Unavailable";
         ShootingAdviceText = plan.Details;
+
+        // Shown beside the score so a night held back by sky brightness rather
+        // than weather is legible at a glance: bad weather means wait, a bright
+        // sky means drive somewhere darker.
+        WeatherScoreText = plan.Quality == ObservingQuality.Unavailable
+            ? string.Empty
+            : $"WEATHER {plan.WeatherScore}";
+        IsSkyLimited = plan.Quality != ObservingQuality.Unavailable &&
+                       plan.WeatherScore - plan.Score >= 15;
+
+        // 100% is a pristine sky. This is the figure the score is multiplied by,
+        // so showing it makes the rating traceable rather than mysterious.
+        SkyDarknessText = plan.Quality == ObservingQuality.Unavailable
+            ? "—"
+            : $"{plan.SkyDarknessPercent}%";
+        SkyLimitText = IsSkyLimited
+            ? "LIMITING THIS TARGET"
+            : string.Empty;
     }
 
     private void ApplyLatestPreviewFrame()
@@ -2901,17 +3686,33 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
             throw new InvalidOperationException("Enter the phone's Wi-Fi IP address and port.");
         }
 
-        if (!value.Contains(':', StringComparison.Ordinal))
+        Match endpointMatch = Regex.Match(
+            value,
+            @"(?<!\d)(?<address>(?:\d{1,3}\.){3}\d{1,3}):(?<port>\d{1,5})(?!\d)",
+            RegexOptions.CultureInvariant);
+        if (endpointMatch.Success &&
+            IPAddress.TryParse(endpointMatch.Groups["address"].Value, out IPAddress? address) &&
+            int.TryParse(
+                endpointMatch.Groups["port"].Value,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out int port) &&
+            port is >= 1 and <= 65535)
         {
-            if (!addDefaultPort)
-            {
-                throw new InvalidOperationException("Enter the pairing address exactly as shown on the phone, including its port.");
-            }
-
-            value += ":5555";
+            return $"{address}:{port}";
         }
 
-        return value;
+        if (!value.Contains(':', StringComparison.Ordinal) &&
+            addDefaultPort &&
+            IPAddress.TryParse(value, out IPAddress? defaultAddress))
+        {
+            return $"{defaultAddress}:5555";
+        }
+
+        throw new InvalidOperationException(
+            addDefaultPort
+                ? "Enter a valid phone IP address and port, for example 192.168.137.132:37123."
+                : "Enter the temporary pairing IP address and port exactly as shown on the phone.");
     }
 
     private void ValidateSessionInputs()
@@ -2963,6 +3764,7 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
         }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(ScreenshotFolder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(PhoneCaptureFolder);
         ArgumentException.ThrowIfNullOrWhiteSpace(SessionDataFolder);
     }
 
@@ -3058,9 +3860,22 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
                         : character.ToString()));
 
     private static string FriendlyToolError(Exception exception, string toolName) =>
-        exception is AstroDesk.Device.Processes.ExecutableNotFoundException
-            ? $"{toolName} was not found. Install it or select its executable in Settings."
-            : exception.Message;
+        exception switch
+        {
+            AstroDesk.Device.Processes.ExecutableNotFoundException =>
+                $"{toolName} was not found. Install it or select its executable in Settings.",
+
+            // The common cause is a device that is listed but no longer
+            // answering, usually a wireless one that has gone off the network.
+            // Naming that is more use than the raw timeout, because the fix is
+            // to pick a different device rather than to try again.
+            AstroDesk.Device.Processes.ToolProcessTimeoutException timeout =>
+                $"The phone stopped responding, so {toolName} was given up on after " +
+                $"{timeout.Timeout.TotalSeconds:0} seconds. Check the device is still " +
+                "reachable, pick another under DEVICE, then try again.",
+
+            _ => exception.Message,
+        };
 
     private static string FriendlyConnectionStatus(DeviceMonitorSnapshot snapshot)
     {
@@ -3093,4 +3908,572 @@ public partial class MainWindowViewModel : ObservableObject, IAsyncDisposable
 
         return dispatcher.InvokeAsync(action, DispatcherPriority.Background).Task.Unwrap();
     }
+
+    // ---------------------------------------------------------------- stacking
+
+    /// <summary>
+    /// How many frames the run should collect before disarming itself. Zero means
+    /// keep collecting until stopped by hand.
+    /// </summary>
+    [ObservableProperty]
+    private int _stackTargetFrameCount = 30;
+
+    [ObservableProperty]
+    private bool _isStackArmed;
+
+    [ObservableProperty]
+    private int _stackCollectedCount;
+
+    [ObservableProperty]
+    private bool _isCollectingDarks;
+
+    [ObservableProperty]
+    private int _stackDarkCount;
+
+    [ObservableProperty]
+    private string _stackStatusText = "Stack mode is off.";
+
+    [ObservableProperty]
+    private string _stackFolderText = string.Empty;
+
+    [ObservableProperty]
+    private string _stackResultText = string.Empty;
+
+    [ObservableProperty]
+    private string _stackResultPath = string.Empty;
+
+    [ObservableProperty]
+    private bool _isStackRunning;
+
+    /// <summary>Stretched rendition of the finished stack, for display.</summary>
+    [ObservableProperty]
+    private ImageSource? _stackResultImage;
+
+    public bool HasStackResult => StackResultImage is not null;
+
+    [ObservableProperty]
+    private string _sirilPath = string.Empty;
+
+    public ObservableCollection<StackFrameTile> StackFrameNames { get; } = [];
+
+    public double StackProgress => StackTargetFrameCount > 0
+        ? Math.Clamp((double)StackCollectedCount / StackTargetFrameCount, 0, 1)
+        : 0;
+
+    public string StackProgressText => StackTargetFrameCount > 0
+        ? $"{StackCollectedCount} / {StackTargetFrameCount} frames"
+        : $"{StackCollectedCount} frames";
+
+    public string StackDarkCountText => StackDarkCount == 1
+        ? "1 dark collected"
+        : $"{StackDarkCount} darks collected";
+
+    public bool IsSirilAvailable => _stackEngine.IsAvailable;
+
+    [RelayCommand]
+    private void ToggleStackMode()
+    {
+        if (_stackSession.IsCollectingDarks)
+        {
+            StackStatusText = "Stop dark collection before starting another light run.";
+            return;
+        }
+
+        if (_stackSession.IsArmed)
+        {
+            _stackSession.Disarm();
+            IsStackArmed = false;
+            StackStatusText = $"Stack mode stopped with {StackCollectedCount} frames collected.";
+            return;
+        }
+
+        _ = TryArmStackRun();
+    }
+
+    [RelayCommand]
+    private void ToggleDarkCollection()
+    {
+        if (_stackSession.IsCollectingDarks)
+        {
+            _stackSession.StopDarkCollection();
+            IsCollectingDarks = false;
+            StackStatusText = $"Dark collection stopped with {StackDarkCountText}.";
+            NotifyAutoCaptureDerived();
+            return;
+        }
+
+        if (_stackSession.SessionFolder.Length == 0)
+        {
+            StackStatusText =
+                "Start a Stack mode run and collect the light frames before collecting darks.";
+
+            // The click already set this true through the two-way binding.
+            // Putting it back is what repaints the button; leaving it would show
+            // an armed toggle while nothing is collecting, and dark frames are
+            // supposed to look like nothing, so the toggle is the only evidence
+            // the mode is on at all.
+            IsCollectingDarks = false;
+            return;
+        }
+
+        try
+        {
+            _stackSession.StartDarkCollection();
+            IsStackArmed = false;
+            IsCollectingDarks = true;
+            StackDarkCount = _stackSession.DarkFrameCount;
+            StackStatusText =
+                "Collecting darks. Keep the lens fully covered and do not change exposure or ISO.";
+            NotifyAutoCaptureDerived();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            StackStatusText = $"Could not start dark collection: {exception.Message}";
+            IsCollectingDarks = false;
+        }
+    }
+
+    /// <summary>
+    /// Starts a fresh collection run. Returns false if the folder could not be
+    /// created.
+    /// </summary>
+    private bool TryArmStackRun()
+    {
+        string root = PhoneCaptureFolder.Length > 0
+            ? PhoneCaptureFolder
+            : _paths.PhoneCaptureRoot;
+
+        try
+        {
+            string folder = _stackSession.Arm(root, StackTargetFrameCount);
+            _livePreview.Reset();
+            LivePreviewImage = null;
+            LivePreviewFramesText = string.Empty;
+            StackFrameNames.Clear();
+            StackCollectedCount = 0;
+            StackDarkCount = 0;
+            IsCollectingDarks = false;
+            StackResultText = string.Empty;
+            StackResultPath = string.Empty;
+            StackResultImage = null;
+            OnPropertyChanged(nameof(HasStackResult));
+            StackFolderText = folder;
+            IsStackArmed = true;
+            StackStatusText = StackTargetFrameCount > 0
+                ? $"Armed. Every photo you take now is collected, up to {StackTargetFrameCount} frames."
+                : "Armed. Every photo you take now is collected until you stop.";
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            StackStatusText = $"Could not start stack mode: {exception.Message}";
+            return false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task RunStackAsync()
+    {
+        if (IsStackRunning)
+        {
+            return;
+        }
+
+        _stackEngine.ExecutablePath = SirilPath;
+        OnPropertyChanged(nameof(IsSirilAvailable));
+
+        if (!_stackEngine.IsAvailable)
+        {
+            StackResultText =
+                "Siril was not found. Install it and set the siril-cli path in Settings.";
+            return;
+        }
+
+        string? extension = _stackSession.ResolveFrameExtension();
+        if (extension is null || _stackSession.SessionFolder.Length == 0)
+        {
+            StackResultText = "There are no collected frames to stack yet.";
+            return;
+        }
+
+        IsStackRunning = true;
+        StackResultText = "Stacking…";
+        try
+        {
+            var progress = new Progress<string>(line => StackResultText = line);
+            StackResult result = await _stackEngine
+                .StackAsync(
+                    new StackRequest(
+                        _stackSession.SessionFolder,
+                        extension,
+                        DarksDirectory: FindDarksFolder(_stackSession.SessionFolder)),
+                    progress,
+                    _lifetimeCancellation.Token)
+                .ConfigureAwait(true);
+
+            StackResultText = result.Message;
+            StackResultPath = result.OutputPath ?? string.Empty;
+
+            // Show the stretched rendition: the master is linear FITS, which
+            // holds the real data but which nothing here can display.
+            StackResultImage = result.PreviewPath is { } preview
+                ? _livePreviewRenderer.LoadThumbnail(preview, 900)
+                : null;
+            OnPropertyChanged(nameof(HasStackResult));
+            if (!result.Succeeded)
+            {
+                _logger.LogWarning("Stacking failed: {Message}", result.Message);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            StackResultText = "Stacking was cancelled.";
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Stacking failed.");
+            StackResultText = $"Stacking failed: {exception.Message}";
+        }
+        finally
+        {
+            IsStackRunning = false;
+        }
+    }
+
+    [RelayCommand]
+    private void OpenStackFolder()
+    {
+        if (StackFolderText.Length == 0 || !Directory.Exists(StackFolderText))
+        {
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo(StackFolderText) { UseShellExecute = true });
+    }
+
+    private void HandleStackFrameAdded(object? sender, StackFrameAddedEventArgs args) =>
+        Dispatch(
+            () =>
+            {
+                StackCollectedCount = args.Collected;
+                StackFrameNames.Insert(
+                    0,
+                    new StackFrameTile(
+                        Path.GetFileName(args.Frame.Path),
+                        _livePreviewRenderer.LoadThumbnail(args.Frame.Path)));
+
+                // Queued rather than decoded here: decoding and aligning a frame
+                // is slow enough to stutter the UI if done on the dispatcher.
+                if (IsLivePreviewEnabled)
+                {
+                    _livePreview.Offer(args.Frame.Path);
+                }
+                IsStackArmed = _stackSession.IsArmed;
+                OnPropertyChanged(nameof(StackProgress));
+                OnPropertyChanged(nameof(StackProgressText));
+                StackStatusText = _stackSession.IsArmed
+                    ? $"Collecting… {StackProgressText}"
+                    : $"Target reached: {StackProgressText}. Ready to stack.";
+            });
+
+    private void HandleStackDarkFrameAdded(object? sender, StackDarkFrameAddedEventArgs args) =>
+        Dispatch(
+            () =>
+            {
+                StackDarkCount = args.Collected;
+                IsCollectingDarks = _stackSession.IsCollectingDarks;
+                StackStatusText = $"Collecting darks… {StackDarkCountText}.";
+            });
+
+    partial void OnStackTargetFrameCountChanged(int value)
+    {
+        OnPropertyChanged(nameof(StackProgress));
+        OnPropertyChanged(nameof(StackProgressText));
+        NotifyAutoCaptureDerived();
+    }
+
+    partial void OnStackCollectedCountChanged(int value)
+    {
+        OnPropertyChanged(nameof(StackProgress));
+        OnPropertyChanged(nameof(StackProgressText));
+    }
+
+    partial void OnStackDarkCountChanged(int value) =>
+        OnPropertyChanged(nameof(StackDarkCountText));
+
+    partial void OnSirilPathChanged(string value)
+    {
+        _stackEngine.ExecutablePath = value;
+        OnPropertyChanged(nameof(IsSirilAvailable));
+    }
+
+
+    // ------------------------------------------------------------ auto capture
+
+    /// <summary>
+    /// Seconds the phone needs after the exposure ends before it can take the
+    /// next frame: writing the file, and for long exposures Samsung's own noise
+    /// reduction pass.
+    /// </summary>
+    [ObservableProperty]
+    private double _autoCaptureWriteDelaySeconds = 4;
+
+    [ObservableProperty]
+    private bool _isAutoCaptureRunning;
+
+    [ObservableProperty]
+    private int _autoCaptureTriggeredCount;
+
+    [ObservableProperty]
+    private string _autoCaptureStatusText = "Auto capture is off.";
+
+    [ObservableProperty]
+    private string _weatherScoreText = string.Empty;
+
+    /// <summary>Sky darkness as a percentage, where 100% is pristine.</summary>
+    [ObservableProperty]
+    private string _skyDarknessText = "—";
+
+    [ObservableProperty]
+    private string _skyLimitText = string.Empty;
+
+    /// <summary>
+    /// True when the weather would allow a good night but sky brightness will not.
+    /// </summary>
+    [ObservableProperty]
+    private bool _isSkyLimited;
+
+    [ObservableProperty]
+    private string _autoCaptureTelemetryText = string.Empty;
+
+    [ObservableProperty]
+    private string _autoCaptureUnaccountedText = string.Empty;
+
+    /// <summary>
+    /// Seconds between shutter presses, derived from the exposure so the phone
+    /// is never asked for a frame it is still busy taking.
+    /// </summary>
+    /// <summary>
+    /// Typical seconds per frame, shown only to estimate how long a run takes.
+    /// The actual cadence follows frame arrival, not this figure.
+    /// </summary>
+    public double AutoCaptureIntervalSeconds =>
+        Math.Max(0, ExposureSeconds) + Math.Max(0, AutoCaptureWriteDelaySeconds);
+
+    public string AutoCaptureIntervalText =>
+        $"Waits for each photo to land  (~{AutoCaptureIntervalSeconds:F0}s per frame)";
+
+    public string AutoCaptureEstimatedRunText
+    {
+        get
+        {
+            if (IsCollectingDarks)
+            {
+                return "Dark collection runs until stopped.";
+            }
+
+            if (StackTargetFrameCount <= 0)
+            {
+                return "Runs until stopped.";
+            }
+
+            TimeSpan total = TimeSpan.FromSeconds(AutoCaptureIntervalSeconds * StackTargetFrameCount);
+            return total.TotalHours >= 1
+                ? $"About {total.TotalHours:F1} h for {StackTargetFrameCount} frames."
+                : $"About {total.TotalMinutes:F0} min for {StackTargetFrameCount} frames.";
+        }
+    }
+
+    [RelayCommand]
+    private async Task ToggleAutoCaptureAsync()
+    {
+        if (_autoCapture.IsRunning)
+        {
+            await _autoCapture.StopAsync().ConfigureAwait(true);
+            IsAutoCaptureRunning = false;
+            AutoCaptureStatusText = $"Auto capture stopped after {AutoCaptureTriggeredCount} shots.";
+            return;
+        }
+
+        string? serial = SelectedAdbDevice?.Serial
+                         ?? _deviceMonitor.LastSnapshot?.Connection.SelectedDevice?.Serial;
+        if (string.IsNullOrWhiteSpace(serial))
+        {
+            AutoCaptureStatusText = "Select a device before starting auto capture.";
+            return;
+        }
+
+        AutoCaptureTriggeredCount = 0;
+
+        // Arm collection first. Firing an unattended sequence while nothing is
+        // collecting produces a folder of captures on the phone and an empty
+        // stack run, and the failure is silent: the shutter works, the files
+        // import, and the frame list simply stays at zero.
+        if (!_stackSession.IsArmed &&
+            !_stackSession.IsCollectingDarks &&
+            !TryArmStackRun())
+        {
+            AutoCaptureStatusText = StackStatusText;
+            return;
+        }
+
+        try
+        {
+            // A volume-key shutter goes to whichever app holds the foreground, so
+            // firing before the camera is up sends the whole run into nothing and
+            // only surfaces at the watchdog a minute later.
+            AutoCaptureStatusText = $"Opening {SelectedCameraApp.Name} on the phone…";
+            CameraReadyResult ready = await _cameraForeground
+                .EnsureForegroundAsync(serial, SelectedCameraApp, _lifetimeCancellation.Token)
+                .ConfigureAwait(true);
+
+            if (!ready.Ready)
+            {
+                AutoCaptureStatusText = ready.Message;
+                return;
+            }
+
+            await _autoCapture
+                .StartAsync(
+                    new AutoCaptureOptions(
+                        serial,
+                        TimeSpan.FromSeconds(Math.Max(0, ExposureSeconds)),
+                        TimeSpan.FromSeconds(Math.Max(0, AutoCaptureWriteDelaySeconds)),
+                        _stackSession.IsCollectingDarks ? 0 : StackTargetFrameCount),
+                    _lifetimeCancellation.Token)
+                .ConfigureAwait(true);
+
+            IsAutoCaptureRunning = true;
+            AutoCaptureStatusText = _stackSession.IsCollectingDarks
+                ? "Running dark capture until stopped. Keep the lens covered and the light-frame exposure and ISO unchanged."
+                : "Running. Each shot fires once the previous photo lands. " +
+                  "The camera app must be open and its volume key set to take pictures.";
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Auto capture could not start.");
+            AutoCaptureStatusText = $"Auto capture could not start: {exception.Message}";
+        }
+    }
+
+    private void HandleAutoCaptureTriggered(object? sender, AutoCaptureTick tick) =>
+        Dispatch(
+            () =>
+            {
+                AutoCaptureTriggeredCount = tick.Frame;
+                AutoCaptureStatusText = tick.Total > 0
+                    ? $"Shutter {tick.Frame} / {tick.Total} — waiting for the photo to land"
+                    : $"Shutter {tick.Frame} — waiting for the photo to land";
+            });
+
+    private void HandleAutoCaptureFinished(object? sender, AutoCaptureFinished args) =>
+        Dispatch(
+            () =>
+            {
+                IsAutoCaptureRunning = false;
+                AutoCaptureStatusText = args.Message;
+                AutoCaptureTelemetryText = args.Telemetry.Summary;
+            });
+
+    private void HandleAutoCaptureTelemetry(object? sender, AutoCaptureTelemetry telemetry) =>
+        Dispatch(
+            () =>
+            {
+                AutoCaptureTelemetryText = telemetry.Summary;
+                AutoCaptureUnaccountedText = telemetry.UnaccountedShutters > 0
+                    ? $"{telemetry.UnaccountedShutters} shutter command(s) produced no photo"
+                    : string.Empty;
+            });
+
+    partial void OnAutoCaptureWriteDelaySecondsChanged(double value) =>
+        NotifyAutoCaptureDerived();
+
+    private void NotifyAutoCaptureDerived()
+    {
+        OnPropertyChanged(nameof(AutoCaptureIntervalSeconds));
+        OnPropertyChanged(nameof(AutoCaptureIntervalText));
+        OnPropertyChanged(nameof(AutoCaptureEstimatedRunText));
+    }
+
+
+    // ------------------------------------------------------- live stack preview
+
+    /// <summary>
+    /// Rough running stack of the frames captured so far.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately lower quality than the final Siril stack. Its job is to show,
+    /// while the session is still running, whether the frames are usable at all.
+    /// </remarks>
+    [ObservableProperty]
+    private ImageSource? _livePreviewImage;
+
+    [ObservableProperty]
+    private string _livePreviewFramesText = string.Empty;
+
+    [ObservableProperty]
+    private string _livePreviewDriftText = string.Empty;
+
+    [ObservableProperty]
+    private bool _isLivePreviewEnabled = true;
+
+    public bool HasLivePreview => LivePreviewImage is not null;
+
+    private void HandleLivePreviewUpdated(object? sender, LivePreviewUpdatedEventArgs args) =>
+        Dispatch(
+            () =>
+            {
+                LivePreviewImage = args.Image;
+                LivePreviewFramesText = args.FramesStacked == 1
+                    ? "1 frame"
+                    : $"{args.FramesStacked} frames";
+
+                // Showing the measured drift makes it obvious when the mount has
+                // been knocked, which otherwise only surfaces at the final stack.
+                LivePreviewDriftText = args.Offset == FrameOffset.Zero
+                    ? "aligned"
+                    : $"drift {args.Offset.Dx:+0;-0;0}, {args.Offset.Dy:+0;-0;0} px";
+
+                OnPropertyChanged(nameof(HasLivePreview));
+            });
+
+    partial void OnLivePreviewImageChanged(ImageSource? value) =>
+        OnPropertyChanged(nameof(HasLivePreview));
+
+
+    // --------------------------------------------------------------- camera app
+
+    /// <summary>
+    /// Camera app used for shooting. The package and its output folder move
+    /// together, so selecting one both launches that app and points the photo
+    /// sync at the folder it writes to.
+    /// </summary>
+    public IReadOnlyList<CameraApp> CameraApps { get; } = CameraApp.All;
+
+    [ObservableProperty]
+    private CameraApp _selectedCameraApp = CameraApp.Default;
+
+    public string CameraAppFolderText => SelectedCameraApp.RemoteFolder;
+
+    partial void OnSelectedCameraAppChanged(CameraApp value)
+    {
+        // Watching the wrong folder produces a run that fires the shutter,
+        // captures successfully, and imports nothing.
+        _photoSync.RemoteFolder = value.RemoteFolder;
+        OnPropertyChanged(nameof(CameraAppFolderText));
+        StatusMessage = $"Shooting with {value.Name}; watching {value.RemoteFolder}.";
+    }
+
+}
+
+/// <summary>
+/// One collected frame in the stack list, with a thumbnail.
+/// </summary>
+/// <remarks>
+/// The thumbnail is null for a file that cannot be rendered, so the list falls
+/// back to showing the name rather than an empty box.
+/// </remarks>
+public sealed record StackFrameTile(string FileName, ImageSource? Thumbnail)
+{
+    public bool HasThumbnail => Thumbnail is not null;
 }

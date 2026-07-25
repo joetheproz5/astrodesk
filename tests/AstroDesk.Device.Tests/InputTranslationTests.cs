@@ -101,6 +101,23 @@ public sealed class InputTranslationTests
     }
 
     [Fact]
+    public void ForwardPointer_PrimesSdlWithMouseMoveBeforeButtonDown()
+    {
+        var sink = new RecordingMessageSink();
+        var forwarder = new Win32InputForwarder(sink, new FakeClipboard());
+
+        var succeeded = forwarder.ForwardPointer(
+            new nint(42),
+            new PointerInput(PointerAction.LeftButtonDown, new MappedPoint(120, 240)));
+
+        Assert.True(succeeded);
+        Assert.Collection(
+            sink.Messages,
+            move => Assert.Equal(InputMessageTranslator.WmMouseMove, move.Message),
+            down => Assert.Equal(InputMessageTranslator.WmLeftButtonDown, down.Message));
+    }
+
+    [Fact]
     public void PasteClipboard_SetsClipboardThenPostsScrcpyPasteChord()
     {
         var sink = new RecordingMessageSink();

@@ -4,11 +4,12 @@
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <UseWPF>true</UseWPF>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\AstroDesk.ico</ApplicationIcon>
     <AssemblyName>AstroDesk</AssemblyName>
     <RootNamespace>AstroDesk.App</RootNamespace>
-    <Version>0.1.11</Version>
-    <FileVersion>0.1.11.0</FileVersion>
-    <AssemblyVersion>0.1.11.0</AssemblyVersion>
+    <Version>0.2.0</Version>
+    <FileVersion>0.2.0.0</FileVersion>
+    <AssemblyVersion>0.2.0.0</AssemblyVersion>
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
@@ -19,6 +20,7 @@
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4078.44" />
     <PackageReference Include="QRCoder" Version="1.8.0" />
   </ItemGroup>
 
@@ -28,6 +30,12 @@
     <ProjectReference Include="..\AstroDesk.Data\AstroDesk.Data.csproj" />
     <ProjectReference Include="..\AstroDesk.Device\AstroDesk.Device.csproj" />
     <ProjectReference Include="..\AstroDesk.Infrastructure\AstroDesk.Infrastructure.csproj" />
+    <ProjectReference Include="..\AstroDesk.Stacking\AstroDesk.Stacking.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\AstroDesk.ico" />
+    <Resource Include="Assets\AstroDeskLogo.png" />
   </ItemGroup>
 
   <ItemGroup>
@@ -35,4 +43,24 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Route WPF touch through the modern WM_POINTER stack instead of the legacy
+      WISP one.
+
+      By default WPF sources touch and stylus exclusively from TabletInputService.
+      That service does not exist on this machine (Windows 11 no longer guarantees
+      it), so WPF received no touch or manipulation events at all and Windows
+      merely promoted touch to mouse. The visible effect was that taps and
+      scrollbar drags worked while finger panning did nothing anywhere, because
+      ScrollViewer.PanningMode needs genuine touch input to engage.
+
+      This switch makes WPF consume WM_POINTER directly, which needs no service.
+      It must be set before WPF initialises, hence runtimeconfig rather than an
+      AppContext call in Main.
+    -->
+    <RuntimeHostConfigurationOption Include="Switch.System.Windows.Input.Stylus.EnablePointerSupport" Value="true" />
+  </ItemGroup>
+
 </Project>

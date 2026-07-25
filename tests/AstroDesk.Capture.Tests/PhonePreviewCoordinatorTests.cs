@@ -28,6 +28,9 @@ public sealed class PhonePreviewCoordinatorTests
             scrcpy,
             histogram,
             new PreviewScreenshotWriter(),
+            new FakePhonePhotoSyncService(),
+            new FakePhoneOrientationSessionService(),
+            new FakeScrcpyWindowManager(),
             NullLogger<PhonePreviewCoordinator>.Instance);
         List<byte[]> renderedPixels = [];
         coordinator.FrameReady += (_, frame) =>
@@ -43,7 +46,10 @@ public sealed class PhonePreviewCoordinatorTests
 
         coordinator.IsFrozen = true;
         coordinator.DisplayMode = NightDisplayMode.FullRed;
-        Assert.Equal([0, 0, 120, 255], renderedPixels[1]);
+
+        // Full red dims the preview rather than tinting it, so hue survives and
+        // only brightness drops: each channel scaled by 0.45, alpha untouched.
+        Assert.Equal([5, 45, 90, 255], renderedPixels[1]);
 
         coordinator.DisplayMode = NightDisplayMode.NormalDark;
         Assert.Equal([10, 100, 200, 255], renderedPixels[2]);
@@ -155,4 +161,56 @@ public sealed class PhonePreviewCoordinatorTests
                 DateTimeOffset.UtcNow,
                 options);
     }
+
+    private sealed class FakePhonePhotoSyncService : IPhonePhotoSyncService
+    {
+        public event EventHandler<PhonePhotoImportedEventArgs>? PhotoImported
+        {
+            add { }
+            remove { }
+        }
+
+        public bool Enabled { get; set; }
+
+        public string DestinationFolder { get; set; } = string.Empty;
+
+        public string RemoteFolder { get; set; } = string.Empty;
+
+        public Task StartAsync(string serial, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class FakePhoneOrientationSessionService : IPhoneOrientationSessionService
+    {
+        public Task EnterLandscapeAsync(string serial, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task RestoreAsync(CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class FakeScrcpyWindowManager : IScrcpyWindowManager
+    {
+        public Task<nint> FindWindowAsync(
+            string exactTitle,
+            int processId,
+            TimeSpan timeout,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(nint.Zero);
+
+        public WindowPresentationState HideOffscreenWithoutMinimizing(nint windowHandle) =>
+            new(windowHandle, default, nint.Zero);
+
+        public void Restore(WindowPresentationState state)
+        {
+        }
+    }
+
 }

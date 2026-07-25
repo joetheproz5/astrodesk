@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
@@ -156,24 +157,62 @@ public sealed class PhonePreviewControl : FrameworkElement
         typeof(PhonePreviewControl),
         new FrameworkPropertyMetadata(default(Size), FrameworkPropertyMetadataOptions.AffectsRender));
 
+    /// <summary>
+    /// Draws the framing guides and nothing else, over a fully transparent
+    /// background.
+    /// </summary>
+    /// <remarks>
+    /// This is what lets the guides appear on top of the real scrcpy video. WPF
+    /// cannot composite over the native child window that scrcpy is reparented
+    /// into, so an instance in this mode is hosted in a separate transparent
+    /// window floating above it. Sharing the control rather than reimplementing
+    /// the geometry keeps the two surfaces from drifting apart.
+    /// </remarks>
+    public static readonly DependencyProperty GuidesOnlyProperty = DependencyProperty.Register(
+        nameof(GuidesOnly),
+        typeof(bool),
+        typeof(PhonePreviewControl),
+        new FrameworkPropertyMetadata(false, FrameworkPropertyMetadataOptions.AffectsRender));
+
+    /// <summary>
+    /// The part of the mirrored screen the camera actually shoots. Guides are
+    /// drawn inside this rather than across the whole phone display.
+    /// </summary>
+    public static readonly DependencyProperty ShootingZoneProperty = DependencyProperty.Register(
+        nameof(ShootingZone),
+        typeof(ShootingZone),
+        typeof(PhonePreviewControl),
+        new FrameworkPropertyMetadata(
+            ShootingZone.FullScreen,
+            FrameworkPropertyMetadataOptions.AffectsRender));
+
     private Point _lastCursorPosition;
     private TouchDevice? _activeTouchDevice;
+    private long _suppressMouseUntilTimestamp;
 
     public PhonePreviewControl()
     {
         Focusable = true;
         ClipToBounds = true;
         SnapsToDevicePixels = true;
-        MouseDown += HandleMouseDown;
-        MouseMove += HandleMouseMove;
-        MouseUp += HandleMouseUp;
-        MouseWheel += HandleMouseWheel;
-        TouchDown += HandleTouchDown;
-        TouchMove += HandleTouchMove;
-        TouchUp += HandleTouchUp;
+        IsManipulationEnabled = false;
+        Stylus.SetIsPressAndHoldEnabled(this, false);
+        Stylus.SetIsFlicksEnabled(this, false);
+
+        // Listen during the tunneling phase so a parent ScrollViewer cannot turn a
+        // phone tap into a dashboard pan before the preview sees it. Mouse handlers
+        // deliberately do not opt into handled events: handled touch must never be
+        // re-admitted as WPF's promoted mouse stream.
+        AddHandler(Mouse.PreviewMouseDownEvent, new MouseButtonEventHandler(HandleMouseDown), false);
+        AddHandler(Mouse.PreviewMouseMoveEvent, new MouseEventHandler(HandleMouseMove), false);
+        AddHandler(Mouse.PreviewMouseUpEvent, new MouseButtonEventHandler(HandleMouseUp), false);
+        AddHandler(Mouse.PreviewMouseWheelEvent, new MouseWheelEventHandler(HandleMouseWheel), false);
+        AddHandler(PreviewTouchDownEvent, new EventHandler<TouchEventArgs>(HandleTouchDown), true);
+        AddHandler(PreviewTouchMoveEvent, new EventHandler<TouchEventArgs>(HandleTouchMove), true);
+        AddHandler(PreviewTouchUpEvent, new EventHandler<TouchEventArgs>(HandleTouchUp), true);
         LostTouchCapture += HandleLostTouchCapture;
-        KeyDown += HandleKeyDown;
-        TextInput += HandleTextInput;
+        AddHandler(Keyboard.PreviewKeyDownEvent, new KeyEventHandler(HandleKeyDown), true);
+        AddHandler(TextCompositionManager.PreviewTextInputEvent, new TextCompositionEventHandler(HandleTextInput), true);
     }
 
     public event EventHandler<PreviewInputEventArgs>? PreviewInput;
@@ -322,6 +361,18 @@ public sealed class PhonePreviewControl : FrameworkElement
         set => SetValue(ScrcpyClientSizeProperty, value);
     }
 
+    public bool GuidesOnly
+    {
+        get => (bool)GetValue(GuidesOnlyProperty);
+        set => SetValue(GuidesOnlyProperty, value);
+    }
+
+    public ShootingZone ShootingZone
+    {
+        get => (ShootingZone)GetValue(ShootingZoneProperty);
+        set => SetValue(ShootingZoneProperty, value);
+    }
+
     public CoordinateMappingContext? CreateMappingContext()
     {
         if (Source is null || ActualWidth <= 0 || ActualHeight <= 0)
@@ -348,6 +399,29 @@ public sealed class PhonePreviewControl : FrameworkElement
     protected override void OnRender(DrawingContext drawingContext)
     {
         base.OnRender(drawingContext);
+
+        // No background fill: every pixel this mode does not draw has to stay
+        // transparent so the scrcpy video underneath shows through. The guides
+        // span the whole surface because the host is aspect-locked to the phone,
+        // so scrcpy's own letterboxing is negligible.
+        if (GuidesOnly)
+        {
+            Rect surface = new(RenderSize);
+            DrawOverlays(drawingContext, surface);
+
+            // The loupe needs pixels, and in this mode the picture on screen
+            // belongs to scrcpy's own window, which WPF cannot read. It is drawn
+            // from the captured frame instead - the same frames the histogram and
+            // screenshots already use - so it works here without the overlay
+            // having to render the video itself.
+            if (FocusMagnifier)
+            {
+                DrawFocusMagnifier(drawingContext, surface);
+            }
+
+            return;
+        }
+
         drawingContext.DrawRectangle(
             FindBrush("PreviewBackgroundBrush", Brushes.Black),
             null,
@@ -412,8 +486,41 @@ public sealed class PhonePreviewControl : FrameworkElement
         return new Rect(centerX - halfWidth, centerY - halfHeight, width, height);
     }
 
-    private void DrawOverlays(DrawingContext context, Rect bounds)
+    /// <summary>
+    /// Narrows a rendered preview rectangle to the camera's shooting zone.
+    /// </summary>
+    private Rect ApplyShootingZone(Rect rendered)
     {
+        ShootingZone zone = ShootingZone.Normalised();
+        if (zone.IsFullScreen)
+        {
+            return rendered;
+        }
+
+        RectD area = zone.Within(new RectD(rendered.X, rendered.Y, rendered.Width, rendered.Height));
+        return new Rect(area.X, area.Y, area.Width, area.Height);
+    }
+
+    private void DrawOverlays(DrawingContext context, Rect renderedBounds)
+    {
+        Rect bounds = ApplyShootingZone(renderedBounds);
+
+        // Outline the zone whenever it is not the whole screen. Guides that sit
+        // inside an invisible boundary are impossible to sanity-check against the
+        // camera's own framing; a faint edge makes a misaligned zone obvious
+        // instead of quietly wrong.
+        if (bounds != renderedBounds)
+        {
+            Brush edgeBrush = OverlayBrush.Clone();
+            edgeBrush.Opacity = Math.Clamp(OverlayOpacity, 0, 1) * 0.45;
+            Pen edgePen = new(edgeBrush, 1)
+            {
+                DashStyle = new DashStyle([4, 4], 0),
+            };
+            edgePen.Freeze();
+            context.DrawRectangle(null, edgePen, bounds);
+        }
+
         Brush brush = OverlayBrush.Clone();
         brush.Opacity = Math.Clamp(OverlayOpacity, 0, 1);
         Pen pen = new(brush, Math.Clamp(OverlayThickness, 0.5, 8));
@@ -490,22 +597,45 @@ public sealed class PhonePreviewControl : FrameworkElement
         }
     }
 
+    /// <summary>
+    /// Draws the magnified focus check, inside the shooting zone.
+    /// </summary>
+    /// <remarks>
+    /// Both the crop and the panel are kept within the zone. Magnifying the whole
+    /// mirrored screen would spend the loupe on the camera's control panel, and
+    /// parking the panel outside the zone would cover controls rather than the
+    /// dead space beside the frame.
+    /// </remarks>
     private void DrawFocusMagnifier(DrawingContext context, Rect renderedRect)
     {
-        double width = Math.Min(220, renderedRect.Width * 0.35);
+        Rect zone = ApplyShootingZone(renderedRect);
+        double width = Math.Min(220, zone.Width * 0.35);
         double height = width * 0.65;
         Rect magnifier = new(
-            renderedRect.Right - width - 12,
-            renderedRect.Top + 12,
+            zone.Right - width - 12,
+            zone.Top + 12,
             width,
             height);
-        double cropWidth = 0.12;
-        double cropHeight = cropWidth * (height / width);
-        Rect crop = new(
-            Math.Clamp(ZoomCenter.X - (cropWidth / 2), 0, 1 - cropWidth),
-            Math.Clamp(ZoomCenter.Y - (cropHeight / 2), 0, 1 - cropHeight),
-            cropWidth,
-            cropHeight);
+
+        if (Source is null)
+        {
+            // Says why rather than showing an empty box. In overlay mode the
+            // picture belongs to scrcpy, so a silent black rectangle would look
+            // like a broken loupe rather than a missing capture.
+            DrawLoupeUnavailable(context, magnifier);
+            return;
+        }
+
+        // ZoomCenter is taken as a position within the shooting zone, so its
+        // default of dead centre lands in the middle of the frame the camera is
+        // actually shooting rather than the middle of the phone's screen.
+        RectD cropped = ShootingZone.Normalised().CropAround(
+            ZoomCenter.X,
+            ZoomCenter.Y,
+            0.12,
+            0.12 * (height / width));
+        Rect crop = new(cropped.X, cropped.Y, cropped.Width, cropped.Height);
+
         ImageBrush brush = new(Source)
         {
             Stretch = Stretch.Fill,
@@ -515,6 +645,26 @@ public sealed class PhonePreviewControl : FrameworkElement
         context.DrawRectangle(FindBrush("PanelBackgroundBrush", Brushes.Black), null, magnifier);
         context.DrawRectangle(brush, new Pen(FindBrush("AccentBrush", Brushes.OrangeRed), 2), magnifier);
         DrawBadge(context, "FOCUS", magnifier.Left + 7, magnifier.Top + 7);
+    }
+
+    private void DrawLoupeUnavailable(DrawingContext context, Rect magnifier)
+    {
+        context.DrawRectangle(
+            new SolidColorBrush(Color.FromArgb(210, 12, 15, 18)),
+            new Pen(FindBrush("PanelBorderBrush", Brushes.DimGray), 1),
+            magnifier);
+
+        FormattedText text = CreateText(
+            "Loupe needs the captured frame",
+            11,
+            FindBrush("SecondaryTextBrush", Brushes.Gray));
+        text.MaxTextWidth = Math.Max(1, magnifier.Width - 16);
+        text.TextAlignment = TextAlignment.Center;
+        context.DrawText(
+            text,
+            new Point(
+                magnifier.Left + 8,
+                magnifier.Top + Math.Max(6, (magnifier.Height - text.Height) / 2)));
     }
 
     private void DrawError(DrawingContext context, Rect bounds, string message)
@@ -595,6 +745,12 @@ public sealed class PhonePreviewControl : FrameworkElement
 
     private void HandleMouseDown(object sender, MouseButtonEventArgs args)
     {
+        if (ShouldSuppressMouse())
+        {
+            args.Handled = true;
+            return;
+        }
+
         Focus();
         CaptureMouse();
         Point position = args.GetPosition(this);
@@ -608,6 +764,12 @@ public sealed class PhonePreviewControl : FrameworkElement
 
     private void HandleMouseMove(object sender, MouseEventArgs args)
     {
+        if (ShouldSuppressMouse())
+        {
+            args.Handled = true;
+            return;
+        }
+
         Point position = args.GetPosition(this);
         _lastCursorPosition = position;
         PreviewInput?.Invoke(this, new PreviewInputEventArgs(PreviewInputKind.MouseMove, position));
@@ -619,6 +781,12 @@ public sealed class PhonePreviewControl : FrameworkElement
 
     private void HandleMouseUp(object sender, MouseButtonEventArgs args)
     {
+        if (ShouldSuppressMouse())
+        {
+            args.Handled = true;
+            return;
+        }
+
         Point position = args.GetPosition(this);
         _lastCursorPosition = position;
         PreviewInput?.Invoke(
@@ -630,6 +798,12 @@ public sealed class PhonePreviewControl : FrameworkElement
 
     private void HandleMouseWheel(object sender, MouseWheelEventArgs args)
     {
+        if (ShouldSuppressMouse())
+        {
+            args.Handled = true;
+            return;
+        }
+
         Point position = args.GetPosition(this);
         PreviewInput?.Invoke(
             this,
@@ -639,6 +813,7 @@ public sealed class PhonePreviewControl : FrameworkElement
 
     private void HandleTouchDown(object? sender, TouchEventArgs args)
     {
+        SuppressPromotedMouse();
         if (_activeTouchDevice is not null)
         {
             args.Handled = true;
@@ -657,6 +832,7 @@ public sealed class PhonePreviewControl : FrameworkElement
 
     private void HandleTouchMove(object? sender, TouchEventArgs args)
     {
+        SuppressPromotedMouse();
         if (_activeTouchDevice != args.TouchDevice)
         {
             args.Handled = true;
@@ -676,6 +852,7 @@ public sealed class PhonePreviewControl : FrameworkElement
 
     private void HandleTouchUp(object? sender, TouchEventArgs args)
     {
+        SuppressPromotedMouse();
         if (_activeTouchDevice != args.TouchDevice)
         {
             args.Handled = true;
@@ -692,6 +869,7 @@ public sealed class PhonePreviewControl : FrameworkElement
 
     private void HandleLostTouchCapture(object? sender, TouchEventArgs args)
     {
+        SuppressPromotedMouse();
         if (_activeTouchDevice != args.TouchDevice)
         {
             return;
@@ -700,6 +878,14 @@ public sealed class PhonePreviewControl : FrameworkElement
         _activeTouchDevice = null;
         PreviewInput?.Invoke(this, new PreviewInputEventArgs(PreviewInputKind.TouchUp, _lastCursorPosition));
     }
+
+    private void SuppressPromotedMouse()
+    {
+        _suppressMouseUntilTimestamp = Stopwatch.GetTimestamp() + (Stopwatch.Frequency / 2);
+    }
+
+    private bool ShouldSuppressMouse() =>
+        _activeTouchDevice is not null || Stopwatch.GetTimestamp() <= _suppressMouseUntilTimestamp;
 
     private void HandleKeyDown(object sender, KeyEventArgs args)
     {

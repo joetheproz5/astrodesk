@@ -82,13 +82,23 @@ public sealed record LightPollutionConditions(
     int DataYear,
     DateTimeOffset CalculatedAt);
 
+/// <param name="Score">
+/// Overall rating for the chosen target, after sky darkness has been applied.
+/// </param>
+/// <param name="WeatherScore">
+/// The same night rated on weather alone. Kept separate so "the weather is
+/// excellent but the sky is too bright" is visible rather than hidden inside a
+/// single number.
+/// </param>
 public sealed record ObservingPlan(
     ObservingQuality Quality,
     int Score,
     DateTimeOffset? BestWindowStart,
     DateTimeOffset? BestWindowEnd,
     string Headline,
-    string Details);
+    string Details,
+    int WeatherScore = 0,
+    int SkyDarknessPercent = 0);
 
 public sealed record LocationSearchResult(
     string DisplayName,

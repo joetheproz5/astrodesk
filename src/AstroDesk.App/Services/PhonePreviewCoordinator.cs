@@ -30,6 +30,12 @@ public interface IPhonePreviewCoordinator : IAsyncDisposable
 
     event EventHandler<PreviewStatus>? StatusChanged;
 
+    /// <summary>
+    /// Raised when capture reattaches to a new scrcpy window, so the embedded
+    /// host can rebind instead of staying pointed at the destroyed one.
+    /// </summary>
+    event EventHandler<nint>? WindowHandleChanged;
+
     bool IsFrozen { get; set; }
 
     NightDisplayMode DisplayMode { get; set; }
@@ -57,7 +63,57 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
     private readonly IWindowCaptureService _capture;
     private readonly IScrcpyService _scrcpy;
     private readonly ThrottledHistogramProcessor _histogram;
+    /// <summary>
+    /// Brightness multiplier applied to the preview in full red mode. Low enough
+    /// to stop the preview glowing in your face on a dark site, high enough to
+    /// still judge framing and focus.
+    /// </summary>
+    private const double FullRedPreviewDimFactor = 0.45;
+
     private readonly PreviewScreenshotWriter _screenshotWriter;
+    private readonly IPhonePhotoSyncService _photoSync;
+    private readonly IPhoneOrientationSessionService _orientation;
+    private readonly IScrcpyWindowManager _windowManager;
+
+    /// <summary>
+    /// Recovery attempts allowed before the preview is declared dead, so a
+    /// genuinely gone window cannot spin forever.
+    /// </summary>
+    private const int MaximumCaptureRecoveries = 3;
+
+    /// <summary>
+    /// How many times the preview restarts itself before giving up.
+    /// </summary>
+    private const int MaximumRestartAttempts = 5;
+
+    /// <summary>
+    /// A session that lasted this long is treated as healthy, which refunds the
+    /// restart budget.
+    /// </summary>
+    /// <remarks>
+    /// Without this an all-night run that drops once an hour would exhaust five
+    /// attempts by midnight and then stay dead until someone noticed. A drop
+    /// after a long good run is a fresh incident, not a failing retry.
+    /// </remarks>
+    private static readonly TimeSpan HealthyRunDuration = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Grows so a phone that is unplugged, or busy rebooting, is not hammered.
+    /// </summary>
+    private static readonly TimeSpan[] RestartBackoff =
+    [
+        TimeSpan.FromSeconds(2),
+        TimeSpan.FromSeconds(5),
+        TimeSpan.FromSeconds(10),
+        TimeSpan.FromSeconds(20),
+        TimeSpan.FromSeconds(30),
+    ];
+
+    private int _restartAttempts;
+    private int _restarting;
+    private volatile bool _stopRequested;
+
+    private int _captureRecoveries;
     private readonly ILogger<PhonePreviewCoordinator> _logger;
     private readonly object _latestSync = new();
     private byte[]? _latestRawPixels;
@@ -74,12 +130,18 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
         IScrcpyService scrcpy,
         ThrottledHistogramProcessor histogram,
         PreviewScreenshotWriter screenshotWriter,
+        IPhonePhotoSyncService photoSync,
+        IPhoneOrientationSessionService orientation,
+        IScrcpyWindowManager windowManager,
         ILogger<PhonePreviewCoordinator> logger)
     {
         _capture = capture;
         _scrcpy = scrcpy;
         _histogram = histogram;
         _screenshotWriter = screenshotWriter;
+        _photoSync = photoSync;
+        _orientation = orientation;
+        _windowManager = windowManager;
         _logger = logger;
 
         _capture.FrameArrived += HandleFrameArrived;
@@ -95,6 +157,8 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
     public event EventHandler<HistogramResult>? HistogramReady;
 
     public event EventHandler<PreviewStatus>? StatusChanged;
+
+    public event EventHandler<nint>? WindowHandleChanged;
 
     public bool IsFrozen { get; set; }
 
@@ -132,30 +196,94 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
 
     public ScrcpySession? CurrentSession => _scrcpy.CurrentSession;
 
+    /// <summary>
+    /// Starts the preview at the user's request, which clears the restart budget.
+    /// </summary>
     public async Task<ScrcpySession> StartAsync(
         ScrcpyLaunchOptions options,
         CancellationToken cancellationToken = default)
     {
-        ScrcpySession session = await _scrcpy.StartAsync(options, cancellationToken).ConfigureAwait(false);
-        await _capture.StartAsync(
-                session.WindowHandle,
-                new WindowCaptureOptions { FramesPerSecond = options.MaxFps is > 0 ? Math.Min(options.MaxFps.Value, 60) : 30 },
-                cancellationToken)
-            .ConfigureAwait(false);
-        PublishStatus(true, "Embedded phone preview running.");
-        return session;
+        _stopRequested = false;
+        Interlocked.Exchange(ref _restartAttempts, 0);
+        return await StartCoreAsync(options, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Starts the preview without touching the restart budget.
+    /// </summary>
+    /// <remarks>
+    /// The automatic restart calls this rather than <see cref="StartAsync"/>.
+    /// Going through the public entry point would refund the budget on every
+    /// failed attempt, so a phone that never comes back would be retried forever
+    /// instead of five times.
+    /// </remarks>
+    private async Task<ScrcpySession> StartCoreAsync(
+        ScrcpyLaunchOptions options,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(options.DeviceSerial))
+        {
+            await _orientation.EnterLandscapeAsync(options.DeviceSerial, cancellationToken).ConfigureAwait(false);
+        }
+
+        try
+        {
+            ScrcpySession session = await _scrcpy.StartAsync(options, cancellationToken).ConfigureAwait(false);
+            Interlocked.Exchange(ref _captureRecoveries, 0);
+            await _capture.StartAsync(
+                    session.WindowHandle,
+                    new WindowCaptureOptions { FramesPerSecond = options.MaxFps is > 0 ? Math.Min(options.MaxFps.Value, 60) : 30 },
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(session.Options.DeviceSerial))
+            {
+                await _photoSync.StartAsync(session.Options.DeviceSerial, cancellationToken).ConfigureAwait(false);
+            }
+
+            PublishStatus(true, "Embedded phone preview running.");
+            return session;
+        }
+        catch
+        {
+            await _photoSync.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            await _capture.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            await _scrcpy.StopAsync(CancellationToken.None).ConfigureAwait(false);
+            await _orientation.RestoreAsync(CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
     }
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
-        await _capture.StopAsync(cancellationToken).ConfigureAwait(false);
-        await _scrcpy.StopAsync(cancellationToken).ConfigureAwait(false);
+        // Set before anything is torn down: stopping scrcpy raises the same
+        // crashed event a real fault does, and restarting a preview the user has
+        // just deliberately stopped would be maddening.
+        _stopRequested = true;
+
+        try
+        {
+            await _photoSync.StopAsync(cancellationToken).ConfigureAwait(false);
+            await _capture.StopAsync(cancellationToken).ConfigureAwait(false);
+            await _scrcpy.StopAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            await _orientation.RestoreAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+
         PublishStatus(false, "Phone preview stopped.");
     }
 
     public async Task<ScrcpySession> ReconnectAsync(CancellationToken cancellationToken = default)
     {
+        await _photoSync.StopAsync(cancellationToken).ConfigureAwait(false);
         await _capture.StopAsync(cancellationToken).ConfigureAwait(false);
+        string? serial = _scrcpy.CurrentSession?.Options.DeviceSerial;
+        if (!string.IsNullOrWhiteSpace(serial))
+        {
+            await _orientation.EnterLandscapeAsync(serial, cancellationToken).ConfigureAwait(false);
+        }
+
         ScrcpySession session = await _scrcpy.ReconnectAsync(cancellationToken).ConfigureAwait(false);
         await _capture.StartAsync(
                 session.WindowHandle,
@@ -167,6 +295,11 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
                 },
                 cancellationToken)
             .ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(session.Options.DeviceSerial))
+        {
+            await _photoSync.StartAsync(session.Options.DeviceSerial, cancellationToken).ConfigureAwait(false);
+        }
+
         PublishStatus(true, "Embedded phone preview reconnected.");
         return session;
     }
@@ -252,7 +385,7 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
             : rawPixels;
         if (_displayMode == NightDisplayMode.FullRed)
         {
-            ApplyRedTint(displayedPixels, _latestWidth, _latestHeight, _latestStride);
+            ApplyPreviewDim(displayedPixels, _latestWidth, _latestHeight, _latestStride);
         }
 
         BitmapSource bitmap = BitmapSource.Create(
@@ -278,7 +411,71 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
     }
 
     private void HandleCaptureFailed(object? sender, CaptureErrorEventArgs args) =>
-        PublishStatus(false, "Embedded preview capture stopped.", args.Message);
+        _ = RecoverCaptureAsync(args);
+
+    /// <summary>
+    /// Re-resolves the scrcpy window and restarts capture after the handle dies.
+    /// </summary>
+    /// <remarks>
+    /// The window handle is captured once when the session starts, but scrcpy
+    /// recreates its SDL window on events such as the device rotating — which
+    /// AstroDesk itself triggers via EnterLandscapeAsync immediately before the
+    /// handle is taken. The old handle then fails GetClientRect with
+    /// ERROR_INVALID_WINDOW_HANDLE and the preview goes black for the rest of the
+    /// session. Because the process is still alive and its title is known, the
+    /// new window can simply be found again.
+    /// </remarks>
+    private async Task RecoverCaptureAsync(CaptureErrorEventArgs args)
+    {
+        ScrcpySession? session = _scrcpy.CurrentSession;
+        if (session is null)
+        {
+            PublishStatus(false, "Embedded preview capture stopped.", args.Message);
+            return;
+        }
+
+        if (Interlocked.Increment(ref _captureRecoveries) > MaximumCaptureRecoveries)
+        {
+            _logger.LogWarning(
+                "Preview capture failed {Count} times; giving up.",
+                MaximumCaptureRecoveries);
+            PublishStatus(false, "Embedded preview capture stopped.", args.Message);
+            return;
+        }
+
+        PublishStatus(false, "Reattaching to the phone preview…");
+
+        try
+        {
+            await _capture.StopAsync(CancellationToken.None).ConfigureAwait(false);
+
+            nint handle = await _windowManager
+                .FindWindowAsync(
+                    session.WindowTitle,
+                    session.ProcessId,
+                    TimeSpan.FromSeconds(10))
+                .ConfigureAwait(false);
+
+            if (handle == nint.Zero)
+            {
+                PublishStatus(false, "Embedded preview capture stopped.", args.Message);
+                return;
+            }
+
+            await _capture
+                .StartAsync(handle, new WindowCaptureOptions(), CancellationToken.None)
+                .ConfigureAwait(false);
+
+            WindowHandleChanged?.Invoke(this, handle);
+            _logger.LogInformation("Preview capture reattached to window {Handle}.", handle);
+            PublishStatus(true, "Embedded phone preview running.");
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Could not reattach the preview capture.");
+            PublishStatus(false, "Embedded preview capture stopped.", args.Message);
+        }
+    }
 
     private void HandleFpsChanged(object? sender, double fps)
     {
@@ -289,8 +486,118 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
     private void HandleHistogramReady(object? sender, HistogramResult result) =>
         HistogramReady?.Invoke(this, result);
 
-    private void HandleScrcpyCrashed(object? sender, ScrcpyCrashedEventArgs args) =>
-        PublishStatus(false, "scrcpy stopped unexpectedly.", $"scrcpy exited with code {args.ExitCode}.");
+    /// <summary>
+    /// Brings the preview back after scrcpy dies under it.
+    /// </summary>
+    /// <remarks>
+    /// The preview used to simply report the death and stay dead, which during a
+    /// night session means the frames stop and nobody finds out until they next
+    /// look at the screen. A USB link that resets, or a phone that drops its
+    /// connection for a moment, should cost a couple of seconds rather than the
+    /// rest of the run.
+    /// </remarks>
+    private async void HandleScrcpyCrashed(object? sender, ScrcpyCrashedEventArgs args)
+    {
+        try
+        {
+            await _photoSync.StopAsync().ConfigureAwait(false);
+
+            if (_stopRequested)
+            {
+                await _orientation.RestoreAsync().ConfigureAwait(false);
+                return;
+            }
+
+            // A session that ran a good while before dying is a fresh incident
+            // rather than a failing retry, so it gets the budget back.
+            if (DateTimeOffset.UtcNow - args.Session.StartedAt >= HealthyRunDuration)
+            {
+                Interlocked.Exchange(ref _restartAttempts, 0);
+            }
+
+            // Only one restart loop at a time; a crash can surface through more
+            // than one path at once.
+            if (Interlocked.Exchange(ref _restarting, 1) == 1)
+            {
+                return;
+            }
+
+            try
+            {
+                await RestartAfterCrashAsync(args).ConfigureAwait(false);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _restarting, 0);
+            }
+        }
+        catch (Exception exception)
+        {
+            // This is an async void event handler: an escaping exception would
+            // take the process down rather than the preview.
+            _logger.LogError(exception, "Recovering the preview after a scrcpy crash failed.");
+            PublishStatus(false, "Phone preview stopped.", exception.Message);
+        }
+    }
+
+    private async Task RestartAfterCrashAsync(ScrcpyCrashedEventArgs args)
+    {
+        PublishStatus(
+            false,
+            "Phone preview lost; reconnecting.",
+            $"scrcpy exited with code {args.ExitCode}.");
+
+        while (!_stopRequested && _restartAttempts < MaximumRestartAttempts)
+        {
+            TimeSpan wait = RestartBackoff[Math.Min(_restartAttempts, RestartBackoff.Length - 1)];
+            int attempt = Interlocked.Increment(ref _restartAttempts);
+
+            PublishStatus(
+                false,
+                $"Phone preview lost; reconnecting in {wait.TotalSeconds:0}s " +
+                $"(attempt {attempt} of {MaximumRestartAttempts}).");
+
+            await Task.Delay(wait).ConfigureAwait(false);
+            if (_stopRequested)
+            {
+                return;
+            }
+
+            try
+            {
+                // Restarted from the dead session's own options rather than
+                // through ReconnectAsync, which reads the current session - and
+                // after a crash there may not be one to read.
+                ScrcpySession session = await StartCoreAsync(
+                    args.Session.Options,
+                    CancellationToken.None).ConfigureAwait(false);
+
+                // The window is a new one, so the host has to be pointed at it or
+                // the preview stays blank while scrcpy runs happily behind it.
+                WindowHandleChanged?.Invoke(this, session.WindowHandle);
+                _logger.LogInformation("Phone preview reconnected after {Attempts} attempt(s).", attempt);
+                PublishStatus(true, "Phone preview reconnected.");
+                return;
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(
+                    exception,
+                    "Preview restart attempt {Attempt} of {Maximum} failed.",
+                    attempt,
+                    MaximumRestartAttempts);
+            }
+        }
+
+        if (!_stopRequested)
+        {
+            await _orientation.RestoreAsync().ConfigureAwait(false);
+            PublishStatus(
+                false,
+                "Phone preview stopped after repeated reconnection failures.",
+                "Check the cable and connection, then press Start preview.");
+        }
+    }
 
     private void HandleScrcpyStateChanged(object? sender, ScrcpyStateChangedEventArgs args)
     {
@@ -303,7 +610,17 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
     private void PublishStatus(bool running, string message, string? error = null) =>
         StatusChanged?.Invoke(this, new PreviewStatus(running, _fps, message, error));
 
-    private static void ApplyRedTint(byte[] pixels, int width, int height, int stride)
+    /// <summary>
+    /// Scales every channel down while leaving hue and saturation intact.
+    /// </summary>
+    /// <remarks>
+    /// Full red mode drops blue and green from AstroDesk's own chrome, but the
+    /// preview is the one surface where colour has to stay truthful: it is the
+    /// frame being judged, and a red-tinted version cannot show a colour cast,
+    /// white balance error, or light pollution gradient. Dimming protects dark
+    /// adaptation, which is the actual goal, without destroying that signal.
+    /// </remarks>
+    private static void ApplyPreviewDim(byte[] pixels, int width, int height, int stride)
     {
         for (int row = 0; row < height; row++)
         {
@@ -311,17 +628,17 @@ public sealed class PhonePreviewCoordinator : IPhonePreviewCoordinator
             for (int column = 0; column < width; column++)
             {
                 int index = rowStart + (column * 4);
-                byte blue = pixels[index];
-                byte green = pixels[index + 1];
-                byte red = pixels[index + 2];
-                byte luminance = (byte)Math.Clamp(
-                    (int)Math.Round((red * 0.299) + (green * 0.587) + (blue * 0.114)),
-                    0,
-                    255);
-                pixels[index] = 0;
-                pixels[index + 1] = 0;
-                pixels[index + 2] = luminance;
+                pixels[index] = Dim(pixels[index]);
+                pixels[index + 1] = Dim(pixels[index + 1]);
+                pixels[index + 2] = Dim(pixels[index + 2]);
+
+                // Alpha at index + 3 is left alone.
             }
         }
+
+        static byte Dim(byte channel) => (byte)Math.Clamp(
+            (int)Math.Round(channel * FullRedPreviewDimFactor, MidpointRounding.AwayFromZero),
+            0,
+            255);
     }
 }

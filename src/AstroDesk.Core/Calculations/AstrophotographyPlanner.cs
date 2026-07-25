@@ -84,18 +84,26 @@ public static class AstrophotographyPlanner
             ?? [scoredHours.OrderByDescending(hour => hour.Score).First()];
 
         int score = (int)Math.Round(bestWindow.Average(hour => hour.Score));
+        int weatherScore = (int)Math.Round(bestWindow.Average(hour => hour.WeatherScore));
         ObservingQuality quality = GetQuality(score);
         DateTimeOffset windowStart = bestWindow[0].Time;
         DateTimeOffset windowEnd = bestWindow[^1].Time.AddHours(1);
         string target = GetTargetLabel(sessionType);
+
+        // The reason lives in its own telemetry cell rather than being appended
+        // here: the score tile truncated the suffix, and a constraint reads
+        // better beside the measurement that causes it.
+        string headline = $"{quality} for {target}";
 
         return new ObservingPlan(
             quality,
             score,
             windowStart,
             windowEnd,
-            $"{quality} for {target}",
-            BuildDetails(bestWindow, lightPollution));
+            headline,
+            BuildDetails(bestWindow, lightPollution, weatherScore, score),
+            weatherScore,
+            (int)Math.Round(ScoreLightPollution(sessionType, lightPollution)));
     }
 
     private static ScoredHour ScoreHour(
@@ -104,7 +112,6 @@ public static class AstrophotographyPlanner
         AstronomyConditions? astronomy,
         LightPollutionConditions? lightPollution)
     {
-        double cloud = ScoreLowerIsBetter(weather.CloudCoverPercent, 1.4);
         double precipitation = ScoreLowerIsBetter(
             weather.PrecipitationProbabilityPercent,
             1.5);
@@ -122,25 +129,29 @@ public static class AstrophotographyPlanner
         double moon = ScoreMoon(sessionType, weather.Time, astronomy);
         double skyglow = ScoreLightPollution(sessionType, lightPollution);
 
-        double score = sessionType is SessionType.Moon or SessionType.Planet
-            ? (cloud * 0.38) +
-              (precipitation * 0.18) +
-              (visibility * 0.12) +
-              (moisture * 0.10) +
-              (wind * 0.12) +
-              (moon * 0.08) +
-              (skyglow * 0.02)
-            : (cloud * 0.30) +
-              (precipitation * 0.10) +
-              (visibility * 0.10) +
-              (moisture * 0.15) +
-              (wind * 0.10) +
-              (moon * 0.15) +
-              (skyglow * 0.10);
+        // Weather only, and cloud is deliberately not a term here either. Sky
+        // darkness is applied after this because it is not weather; cloud is
+        // applied to this because it is. Both are gates rather than ingredients:
+        // neither trades off against how still or dry the air is.
+        double conditions = sessionType is SessionType.Moon or SessionType.Planet
+            ? (precipitation * 0.30) +
+              (visibility * 0.20) +
+              (moisture * 0.16) +
+              (wind * 0.21) +
+              (moon * 0.13)
+            : (precipitation * 0.16) +
+              (visibility * 0.16) +
+              (moisture * 0.26) +
+              (wind * 0.16) +
+              (moon * 0.26);
+
+        double weatherScore = Clamp(conditions) * CloudFactor(weather.CloudCoverPercent);
+        double score = weatherScore * SkyglowFactor(sessionType, skyglow);
 
         return new ScoredHour(
             weather.Time,
             Clamp(score),
+            Clamp(weatherScore),
             weather.CloudCoverPercent,
             weather.PrecipitationProbabilityPercent,
             weather.VisibilityKilometers,
@@ -190,6 +201,95 @@ public static class AstrophotographyPlanner
             : astronomy?.MoonAltitudeDegrees;
     }
 
+    /// <summary>
+    /// Multiplier applied to the weather score for the forecast cloud cover.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Cloud used to be the heaviest weighted term, which sounds severe but was
+    /// not: at 95% cover it forfeited its own third of the total while the
+    /// remaining two thirds paid out in full, so a fully overcast night at a dark
+    /// site still rated 62 and was reported as fair. Nothing is shootable through
+    /// solid overcast, whatever the wind and humidity are doing, so cloud belongs
+    /// in the same category as sky brightness: a gate on the result rather than
+    /// an ingredient trading off against the others.
+    /// </para>
+    /// <para>
+    /// The curve is superlinear because broken cloud costs more than the fraction
+    /// of sky it covers. Frames are minutes long and the cloud drifts, so a third
+    /// of the sky covered ruins well over a third of the exposures, and every
+    /// ruined frame has to be found and thrown out of the stack.
+    /// </para>
+    /// <para>
+    /// A forecast reports how much sky is covered, never how thick the cloud is,
+    /// so cover is treated as opaque. That is wrong for the thin high haze the
+    /// Moon punches straight through, and the error is deliberately on the
+    /// pessimistic side: being told to stay in on a night that turned out usable
+    /// costs less than driving to a dark site under cloud.
+    /// </para>
+    /// </remarks>
+    public static double CloudFactor(double? cloudCoverPercent)
+    {
+        if (cloudCoverPercent is null)
+        {
+            return 0.85;
+        }
+
+        double covered = Math.Clamp(cloudCoverPercent.Value / 100.0, 0, 1);
+        return Math.Pow(1 - covered, 1.4);
+    }
+
+    /// <summary>
+    /// How much a target depends on a dark sky, from 0 (indifferent) to 1.
+    /// </summary>
+    /// <remarks>
+    /// The Moon is bright enough to shoot from a city centre; the Milky Way is
+    /// not. Treating light pollution as one weighted term among several implied
+    /// they were comparable concerns, and it was not: under the previous model
+    /// sky darkness moved the total by at most ten points, so a cloudless night
+    /// under Bortle 6 scored in the high eighties and was reported as excellent
+    /// for the Milky Way. No amount of transparency, stillness or moonlessness
+    /// makes a washed-out core appear.
+    /// </remarks>
+    public static double SkyglowSensitivity(SessionType sessionType) =>
+        sessionType switch
+        {
+            // Faint extended structure. Sky brightness is the whole game.
+            SessionType.MilkyWay or SessionType.DeepSky => 1.0,
+
+            // Wide fields still want darkness, but a bright foreground subject
+            // or bright stars survive a compromised sky.
+            SessionType.Starscape => 0.85,
+            SessionType.StarTrails or SessionType.Constellation => 0.5,
+            SessionType.Timelapse => 0.4,
+
+            // Bright targets. These are shot from balconies in cities.
+            SessionType.Moon or SessionType.Planet => 0.0,
+
+            _ => 0.3,
+        };
+
+    /// <summary>
+    /// Multiplier applied to the weather score for the chosen target.
+    /// </summary>
+    /// <remarks>
+    /// A multiplier rather than a term, so a bright sky caps what the night can
+    /// be worth instead of costing it a few points. At full sensitivity a Bortle
+    /// 6 sky yields roughly a fifth of the weather score, which is the honest
+    /// answer for the Milky Way.
+    /// </remarks>
+    public static double SkyglowFactor(SessionType sessionType, double skyglowScore)
+    {
+        double sensitivity = SkyglowSensitivity(sessionType);
+        if (sensitivity <= 0)
+        {
+            return 1.0;
+        }
+
+        double normalised = Math.Clamp(skyglowScore / 100.0, 0, 1);
+        return 1.0 - (sensitivity * (1.0 - normalised));
+    }
+
     private static double ScoreLightPollution(
         SessionType sessionType,
         LightPollutionConditions? lightPollution)
@@ -236,7 +336,9 @@ public static class AstrophotographyPlanner
 
     private static string BuildDetails(
         IReadOnlyCollection<ScoredHour> hours,
-        LightPollutionConditions? lightPollution)
+        LightPollutionConditions? lightPollution,
+        int weatherScore,
+        int score)
     {
         double? cloud = Average(hours.Select(hour => hour.CloudCoverPercent));
         double? precipitation = Average(
@@ -286,6 +388,13 @@ public static class AstrophotographyPlanner
             details.Add("strong local skyglow");
         }
 
+        // Lead with the constraint when the sky, not the weather, is what is
+        // holding the night back. Truncation below would otherwise drop it.
+        if (weatherScore - score >= 15)
+        {
+            details.Insert(0, $"weather {weatherScore}/100 but sky brightness limits this target");
+        }
+
         return string.Join(" · ", details.Take(4));
     }
 
@@ -327,6 +436,7 @@ public static class AstrophotographyPlanner
     private sealed record ScoredHour(
         DateTimeOffset Time,
         double Score,
+        double WeatherScore,
         double? CloudCoverPercent,
         double? PrecipitationProbabilityPercent,
         double? VisibilityKilometers,
